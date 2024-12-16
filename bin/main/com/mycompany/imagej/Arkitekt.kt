@@ -202,16 +202,21 @@ class Arkitekt {
         val response = client.query(MeQuery()).execute()
 
         println("Response: ${response.data}")
-        return response.data
+        response.data.let { data ->
+            if (data == null) {
+                throw Exception("Failed to retrieve user data")
+            }
+            return data
+        }
     }
 
-    fun login(callback: (Result<MeQuery.Data>) -> Unit) {
+    fun login(callback: (MeQuery.Data) -> Unit) {
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 val result = alogin("http://127.0.0.1/lok/f")
-                withContext(Dispatchers.Main) { callback(Result.success(result)) }
+                withContext(Dispatchers.Main) { callback(result) }
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { callback(Result.failure(e)) }
+                println("Failed to login: ${e.message}")
             }
         }
     }
