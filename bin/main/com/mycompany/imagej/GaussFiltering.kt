@@ -78,11 +78,7 @@ class Dialog : JDialog {
 
         val button = javax.swing.JButton("Press me")
         button.addActionListener {
-            arkitekt.login { data ->
-                contentPanel.add(javax.swing.JLabel("Hello, ${data.me.username}"))
-                contentPanel.revalidate()
-                contentPanel.repaint()
-            }
+            arkitekt.login { user -> contentPanel.add(javax.swing.JLabel("Hello, ${user}")) }
         }
         contentPanel.add(button)
     }
