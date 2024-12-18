@@ -1,4 +1,4 @@
-package com.mycompany.imagej
+package com.mycompany.arkitekt
 
 import Agent
 import FunctionRegistry

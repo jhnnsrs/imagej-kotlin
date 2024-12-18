@@ -35,9 +35,9 @@
  */
 @file:JvmMultifileClass
 
-package com.mycompany.imagej
+package com.mycompany.arkitekt
 
-import ij.*
+
 import net.imagej.DatasetService
 import net.imagej.ImageJ
 import net.imagej.ops.OpService
@@ -61,7 +61,7 @@ fun main() {
     ij.launch()
 
     // invoke the plugin
-    ij.command().run(GaussFiltering::class.java, true)
+    ij.command().run(ArkitektCommand::class.java, true)
 }
 
 class Dialog : JDialog {
@@ -97,8 +97,8 @@ class Dialog : JDialog {
  * You should replace the parameter fields with your own inputs and outputs, and replace the [run]
  * method implementation with your own logic.
  */
-@Plugin(type = Command::class, menuPath = "Plugins > Gauss Filtering")
-open class GaussFiltering<T : RealType<T>> : Command {
+@Plugin(type = Command::class, menuPath = "Plugins > Arkitekt")
+open class ArkitektCommand<T : RealType<T>> : Command {
     //
     // Feel free to add more parameters here...
     //

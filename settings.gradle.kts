@@ -1,1 +1,1 @@
-rootProject.name = "GaussFiltering"
+rootProject.name = "ArkitektCommand"

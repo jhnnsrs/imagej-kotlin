@@ -9,7 +9,7 @@ plugins {
 group = "com.mycompany"
 version = "0.1.0-SNAPSHOT"
 
-description = "Gauss Filtering"
+description = "Arkitekt Command"
 
 repositories {
     mavenCentral()
@@ -25,8 +25,6 @@ dependencies {
     implementation("com.apollographql.apollo:apollo-runtime:4.0.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing")
-    implementation("org.janelia.saalfeldlab:n5-ij:4.0.2")
-    implementation("org.janelia.saalfeldlab:n5-zarr")
     implementation("dev.zarr:zarr-java:0.0.4")
     implementation("com.amazonaws:aws-java-sdk-s3:1.12.780")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0-RC")
@@ -86,4 +84,32 @@ apollo {
             schemaFile.set(file("src/main/graphql/rekuest/schema.graphqls"))
         }
     }
+}
+
+// Fat JAR task
+tasks.register<Jar>("fatJar") {
+    group = "build"
+    description = "Assembles a fat JAR file with dependencies included."
+
+    manifest {
+        attributes["Main-Class"] = "com.mycompany.arkitekt.ArkitektCommand" // Replace with your main class
+    }
+
+    from(sourceSets.main.get().output)
+
+    // Include dependencies in the JAR
+    dependsOn(configurations.runtimeClasspath)
+    // Include dependencies in the JAR, excluding ImageJ
+    dependsOn(configurations.runtimeClasspath)
+    from({
+        configurations.runtimeClasspath.get()
+            .filter { !it.name.contains("imagej") } // Exclude ImageJ dependencies
+            .map { if (it.isDirectory) it else zipTree(it) }
+    })
+
+    archiveClassifier.set("all")
+
+    // Set the duplicates handling strategy
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    isZip64 = true
 }
