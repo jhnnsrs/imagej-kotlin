@@ -1,5 +1,6 @@
+package com.mycompany.arkitekt
+
 import com.apollographql.apollo.api.Optional
-import com.mycompany.arkitekt.*
 import com.mycompany.rekuest.graphql.EnsureAgentMutation
 import com.mycompany.rekuest.graphql.GetProvisionQuery
 import com.mycompany.rekuest.graphql.SetExtensionTemplatesMutation

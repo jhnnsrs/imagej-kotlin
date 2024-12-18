@@ -4,6 +4,7 @@ plugins {
     kotlin("kapt") version "2.1.0"
     kotlin("plugin.serialization") version "2.1.0"
     id("com.apollographql.apollo") version "4.0.0"
+    id("maven-publish") // Add this line
 }
 
 group = "com.mycompany"
@@ -103,7 +104,6 @@ tasks.register<Jar>("fatJar") {
     dependsOn(configurations.runtimeClasspath)
     from({
         configurations.runtimeClasspath.get()
-            .filter { !it.name.contains("imagej") } // Exclude ImageJ dependencies
             .map { if (it.isDirectory) it else zipTree(it) }
     })
 
@@ -112,4 +112,51 @@ tasks.register<Jar>("fatJar") {
     // Set the duplicates handling strategy
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     isZip64 = true
+}
+
+
+publishing {
+    publications {
+        create<MavenPublication>("mavenJava") {
+            from(components["java"]) // Use the Java component
+
+            groupId = "com.mycompany"
+            artifactId = "arkitekt"
+            version = "0.1.0-SNAPSHOT"
+        }
+    }
+
+    repositories {
+        maven {
+            name = "local"
+            url = uri("${buildDir}/repo") // Publish to build/repo directory
+        }
+    }
+}
+
+
+tasks.register<Copy>("installToImageJ") {
+    description = "Copy plugin and dependencies to ImageJ plugins directory"
+
+    // Path to ImageJ's plugins directory
+    val imagejPluginsDir = file("${buildDir}/plugins")
+
+    from(configurations.runtimeClasspath) {
+        include("**/*.jar")
+    }
+
+    into(imagejPluginsDir)
+
+    // Also copy your own plugin JAR
+    from(tasks.named("jar")) {
+        include("**/*.jar")
+    }
+
+    // Zip the plugin directory
+    val zipFile = file("${buildDir}/arkitekt-plugin.zip")
+    doLast {
+        ant.withGroovyBuilder {
+            "zip"("destfile" to zipFile, "basedir" to imagejPluginsDir)
+        }
+    }
 }

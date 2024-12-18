@@ -1,7 +1,4 @@
 package com.mycompany.arkitekt
-
-import Agent
-import FunctionRegistry
 import com.amazonaws.auth.AWSStaticCredentialsProvider
 import com.amazonaws.auth.BasicSessionCredentials
 import com.amazonaws.client.builder.AwsClientBuilder
@@ -70,7 +67,8 @@ data class UnlokFakt(
         public val client_id: String,
         public val client_secret: String,
         public val scopes: List<String>,
-        public val endpoint_url: String
+        public val endpoint_url: String,
+        public val token_url: String
 )
 
 @Serializable data class MikroFakt(val endpoint_url: String)
@@ -326,8 +324,8 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
                     )
             )
 
-    suspend fun loginUser(unlok: UnlokFakt): String {
-        val tokenUrl = "http://127.0.0.1/lok/o/token/"
+    suspend fun loginUser( unlok: UnlokFakt): String {
+        val tokenUrl = unlok.token_url + "/"
         val bodyString =
                 "grant_type=client_credentials&client_id=${unlok.client_id}&client_secret=${unlok.client_secret}"
         val body =
@@ -350,13 +348,13 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
         }
     }
 
-    suspend fun retrieveFakts(token: String): Fakts {
+    suspend fun retrieveFakts(url: String, token: String): Fakts {
         val challengeJson = gson.toJson(RetrieveRequest(token))
         val challengeBody =
                 challengeJson.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
 
         val challengeRequest =
-                Request.Builder().url("http://127.0.0.1/lok/f/claim/").post(challengeBody).build()
+                Request.Builder().url("${url}/claim/").post(challengeBody).build()
 
         return withContext(Dispatchers.IO) {
             client.newCall(challengeRequest).execute().use { response ->
@@ -396,6 +394,7 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
     }
 
     suspend fun challengeDeviceCode(
+            url: String,
             deviceCode: String,
     ): String {
         repeat(10) {
@@ -409,7 +408,7 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
 
             val challengeRequest =
                     Request.Builder()
-                            .url("http://127.0.0.1/lok/f/challenge/")
+                            .url("${url}/challenge/")
                             .post(challengeBody)
                             .build()
             val response = client.newCall(challengeRequest).execute()
@@ -434,17 +433,26 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
 
         storedToken?.let {
             try {
-                return retrieveFakts(it)
+                return retrieveFakts(url, it)
             } catch (e: Exception) {
                 prefs.remove("token")
                 println("Failed to retrieve Fakts: ${e.message}")
             }
         }
 
-        val deviceCode = retrieveDeviceCode("http://127.0.0.1/lok/f/start/")
-        println("http://127.0.0.1/lok/f/configure/?grant=device_code&device_code=" + deviceCode)
-        val token = challengeDeviceCode(deviceCode)
-        val fakts = retrieveFakts(token)
+        val deviceCode = retrieveDeviceCode("${url}/start/")
+
+        val deviceUrl = "${url}/configure/?grant=device_code&device_code=${deviceCode}"
+        val osName = System.getProperty("os.name").lowercase()
+        when {
+            osName.contains("win") -> ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", deviceUrl).start()
+            osName.contains("mac") -> ProcessBuilder("open", deviceUrl).start()
+            osName.contains("nix") || osName.contains("nux") -> ProcessBuilder("xdg-open", deviceUrl).start()
+            else -> throw Exception("Unsupported operating system")
+        }
+        println("${url}/configure/?grant=device_code&device_code=" + deviceCode)
+        val token = challengeDeviceCode(url, deviceCode)
+        val fakts = retrieveFakts(url, token)
         prefs.put("token", token)
         return fakts
     }
@@ -465,10 +473,10 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
         throw Exception("Failed to retrieve user data")
     }
 
-    fun login(callback: (MeQuery.Data) -> Unit) {
+    fun login(url: String, callback: (MeQuery.Data) -> Unit) {
         CoroutineScope(Dispatchers.Default).launch {
             try {
-                val result = alogin("http://127.0.0.1/lok/f")
+                val result = alogin(url)
                 withContext(Dispatchers.Main) { callback(result) }
             } catch (e: Exception) {
                 println("Failed to login: ${e.message}")
@@ -476,9 +484,6 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
         }
     }
 
-    suspend fun doStuff() {
-        var fakts = getFakts("http://127.0.0.1/lok/f")
-    }
 
     suspend fun uploadArray(app: App, inarray: ucar.ma2.Array, name: String): FromArrayLikeMutation.FromArrayLike {
 

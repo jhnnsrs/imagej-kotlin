@@ -13,12 +13,12 @@
 	</parent>
 
 	<groupId>com.mycompany</groupId>
-	<artifactId>imagej</artifactId>
+	<artifactId>arkitekt</artifactId>
 	<version>0.1.0-SNAPSHOT</version>
 
-	<name>Gauss Filtering</name>
-	<description>A Maven project implementing an ImageJ command.</description>
-	<url>https://mycompany.com/imagej/gauss-filtering/</url>
+	<name>ArkitektCommand</name>
+	<description>A Maven project implementing arktiekt command</description>
+	<url>https://mycomapny.com/arkitekt/ArktiektCommandg/</url>
 	<inceptionYear>2017</inceptionYear>
 	<organization>
 		<name>My Company</name>
@@ -79,8 +79,8 @@
 	</ciManagement>
 
 	<properties>
-		<package-name>com.mycompany.imagej</package-name>
-		<main-class>com.mycompany.imagej.GaussFiltering</main-class>
+		<package-name>com.mycompany.arkitekt</package-name>
+		<main-class>com.mycompany.arkitekt.ArkitektCommand</main-class>
 		<license.licenseName>bsd_2</license.licenseName>
 		<license.copyrightOwners>My Company, Inc.</license.copyrightOwners>
 		<scijava.jvm.version>1.8</scijava.jvm.version>
