@@ -6,3 +6,29 @@ mutation EnsureAgent($input: AgentInput!) {
     name
   }
 }
+
+mutation CreateTemplate($input: CreateTemplateInput!) {
+  createTemplate(input: $input) {
+    id
+  }
+}
+
+query GetProvision($id: ID!) {
+  provision(id: $id) {
+    id
+    template {
+        id
+        interface
+        extension
+    }
+  }
+}
+
+mutation SetExtensionTemplates($input: SetExtensionTemplatesInput!) {
+  setExtensionTemplates(input: $input) {
+    id
+    node {
+        id
+    }
+  }
+}

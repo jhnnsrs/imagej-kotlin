@@ -1,103 +1,259 @@
-"""
-Make string uppercase
-"""
+"""Make string uppercase"""
 directive @upper on FIELD
 
-"""
-Replace a substring with another substring
-"""
 directive @replace(old: String!, new: String!) on FIELD
 
-"""
-Make get stuff uppercase
-"""
+"""Make get stuff uppercase"""
 directive @relation(on: String!) on FIELD
 
-"""
-A descendant of a comment. Descendend are used to render rich text in the frontend.
-"""
-interface Descendant {
-  """
-  Unsafe children are not typed and fall back to json. This is a workaround if queries get too complex.
-  """
-  unsafeChildren: [UnsafeChild!]
-  kind: DescendantKind!
-  children: [Descendant!]
+type SliderAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  min: Float
+  max: Float
+  step: Float
+}
+
+interface AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+}
+
+enum AssignWidgetKind {
+  SEARCH
+  CHOICE
+  SLIDER
+  CUSTOM
+  STRING
+  STATE_CHOICE
+}
+
+type ChoiceAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  choices: [Choice!]
+}
+
+type Choice {
+  label: String!
+  value: String!
+  description: String
+}
+
+type SearchAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  query: String!
+  ward: String!
+  filters: [ChildPort!]
+}
+
+type ChildPort {
+  key: String!
+  label: String
+  scope: PortScope!
+  kind: PortKind!
+  description: String
+  identifier: Identifier
+  nullable: Boolean!
+  default: AnyDefault
+  children: [ChildPort!]
+  assignWidget: AssignWidget
+  returnWidget: ReturnWidget
+}
+
+enum PortScope {
+  GLOBAL
+  LOCAL
+}
+
+enum PortKind {
+  INT
+  STRING
+  STRUCTURE
+  LIST
+  BOOL
+  DICT
+  FLOAT
+  DATE
+  UNION
+  MODEL
 }
 
 """
-The `Identifier` scalasr typsse represents a reference to a store previously created by the user n a datalayer
+The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
 """
-scalar UnsafeChild
+scalar Identifier
 
 """
-The Kind of a Descendant
+The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
 """
-enum DescendantKind {
-  LEAF
-  MENTION
-  PARAGRAPH
+scalar AnyDefault
+
+interface ReturnWidget {
+  kind: ReturnWidgetKind!
 }
 
-"""
-A mention of a user
-"""
-type MentionDescendant implements Descendant {
-  """
-  Unsafe children are not typed and fall back to json. This is a workaround if queries get too complex.
-  """
-  unsafeChildren: [UnsafeChild!]
-  kind: DescendantKind!
-  children: [Descendant!]
-  user: User
+enum ReturnWidgetKind {
+  CHOICE
+  CUSTOM
 }
 
-"\nA User is a person that can log in to the system. They are uniquely identified by their username.\nAnd can have an email address associated with them (but don't have to).\n\nA user can be assigned to groups and has a profile that can be used to display information about them.\nDetail information about a user can be found in the profile.\n\nAll users can have social accounts associated with them. These are used to authenticate the user with external services,\nsuch as ORCID or GitHub.\n\n"
-type User {
-  id: ID!
-
-  """
-  Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.
-  """
-  username: String!
-  firstName: String
-  lastName: String
-  email: String
-
-  """
-  The groups this user belongs to. A user will get all permissions granted to each of their groups.
-  """
-  groups(filters: GroupFilter, pagination: OffsetPaginationInput): [Group!]!
-  avatar: String
-  profile: Profile!
-  managedClients: [DjangoModelType!]!
-  socialAccounts: [SocialAccount!]!
+type StateChoiceAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  stateChoices: String!
 }
 
-"\nA Group is the base unit of Role Based Access Control. A Group can have many users and many permissions. A user can have many groups. A user with a group that has a permission can perform the action that the permission allows.\nGroups are propagated to the respecting subservices. Permissions are not. Each subservice has to define its own permissions and mappings to groups.\n"
-type Group {
+type CustomReturnWidget implements ReturnWidget {
+  kind: ReturnWidgetKind!
+  hook: String!
+  ward: String!
+}
+
+type ChoiceReturnWidget implements ReturnWidget {
+  kind: ReturnWidgetKind!
+  choices: [Choice!]
+}
+
+type StringAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  placeholder: String!
+  asParagraph: Boolean!
+}
+
+type CustomAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  hook: String!
+  ward: String!
+}
+
+type CustomEffect implements Effect {
+  dependencies: [EffectDependency!]!
+  kind: EffectKind!
+  hook: String!
+  ward: String!
+}
+
+interface Effect {
+  dependencies: [EffectDependency!]!
+  kind: EffectKind!
+}
+
+type EffectDependency {
+  condition: LogicalCondition!
+  key: String!
+  value: String!
+}
+
+enum LogicalCondition {
+  IS
+  IS_NOT
+  IN
+}
+
+enum EffectKind {
+  MESSAGE
+  CUSTOM
+}
+
+type MessageEffect implements Effect {
+  dependencies: [EffectDependency!]!
+  kind: EffectKind!
+  message: String!
+}
+
+interface UIChild {
+  kind: UIChildKind!
+}
+
+enum UIChildKind {
+  GRID
+  SPLIT
+  RESERVATION
+  STATE
+}
+
+type UIGrid implements UIChild {
+  kind: UIChildKind!
+  rowHeight: Int!
+  columns: Int!
+  children: [UIGridItem!]!
+}
+
+type UIGridItem {
+  x: Int!
+  y: Int!
+  w: Int!
+  h: Int!
+  minW: Int!
+  maxW: Int!
+  child: UIChild!
+}
+
+type UISplit implements UIChild {
+  kind: UIChildKind!
+  left: UIChild!
+  right: UIChild!
+}
+
+type UIState implements UIChild {
+  kind: UIChildKind!
+  state: String!
+}
+
+type Query {
+  clients(filters: AppFilter, order: AppOrder, pagination: OffsetPaginationInput): [App!]!
+  hardwareRecords(filters: HardwareRecordFilter, pagination: OffsetPaginationInput): [HardwareRecord!]!
+  agents(filters: AgentFilter, order: AgentOrder, pagination: OffsetPaginationInput): [Agent!]!
+  nodes(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
+  protocols(filters: ProtocolFilter, order: ProtocolOrder, pagination: OffsetPaginationInput): [Protocol!]!
+  templates(filters: TemplateFilter, pagination: OffsetPaginationInput): [Template!]!
+  testResults(filters: TestResultFilter, pagination: OffsetPaginationInput): [TestResult!]!
+  testCases(filters: TestCaseFilter, pagination: OffsetPaginationInput): [TestCase!]!
+  reservations(instanceId: InstanceId = null): [Reservation!]!
+  myreservations(instanceId: InstanceId = null): [Reservation!]!
+  provisions(filters: ProvisionFilter, pagination: OffsetPaginationInput): [Provision!]!
+  dashboards: [Dashboard!]!
+  states: [State!]!
+  panels: [Panel!]!
+  stateSchemas: [StateSchema!]!
+  node(id: ID = null, reservation: ID = null, assignation: ID = null, template: ID = null, hash: NodeHash = null): Node!
+  assignations(instanceId: InstanceId = null): [Assignation!]!
+  event(id: ID = null): [AssignationEvent!]!
+  templateAt(agent: ID!, extension: String = null, interface: String = null, nodeHash: String = null): Template!
+  myTemplateAt(instanceId: String!, nodeId: ID = null, interface: String = null): Template!
+  stateFor(template: ID = null, agent: ID = null, stateHash: String = null): State!
+  state(id: ID!): State!
+  panel(id: ID!): Panel!
+  stateSchema(id: ID!): StateSchema!
+  hardwareRecord(id: ID!): HardwareRecord!
+  agent(id: ID!): Agent!
+  dashboard(id: ID!): Dashboard!
+  dependency(id: ID!): Dependency!
+  testCase(id: ID!): TestCase!
+  testResult(id: ID!): TestResult!
+  reservation(id: ID!): Reservation!
+  template(id: ID!): Template!
+  provision(id: ID!): Provision!
+  assignation(id: ID!): Assignation!
+}
+
+type App {
   id: ID!
   name: String!
-  users(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
+  clientId: String!
 }
 
-"""
-A User of the System
-
-Lok Users are the main users of the system. They can be assigned to groups and have profiles, that can be used to display information about them.
-Each user is identifier by a unique username, and can have an email address associated with them.
-"""
-input UserFilter {
-  search: String
-
-  """
-  Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.
-  """
-  username: StrFilterLookup
+input AppFilter {
+  interface: StrFilterLookup
   ids: [ID!]
-  socialAccounts: SocialAccountFilter
-  AND: UserFilter
-  OR: UserFilter
+  hasTemplatesFor: [NodeHash!]
+  mine: Boolean
+  AND: AppFilter
+  OR: AppFilter
 }
 
 input StrFilterLookup {
@@ -138,18 +294,17 @@ input StrFilterLookup {
 }
 
 """
-SocialAccount(id, user, provider, uid, last_login, date_joined, extra_data)
+The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
 """
-input SocialAccountFilter {
-  search: String
-  provider: ProviderType
-  ids: [ID!]
-  AND: SocialAccountFilter
-  OR: SocialAccountFilter
+scalar NodeHash
+
+input AppOrder {
+  definedAt: Ordering
 }
 
-enum ProviderType {
-  ORCID
+enum Ordering {
+  ASC
+  DESC
 }
 
 input OffsetPaginationInput {
@@ -157,976 +312,1048 @@ input OffsetPaginationInput {
   limit: Int! = -1
 }
 
+type HardwareRecord {
+  id: ID!
+  cpuCount: Int!
+  cpuVendorName: String!
+  cpuFrequency: Float!
+  createdAt: DateTime!
+  agent: Agent!
+}
+
+"""Date with time (isoformat)"""
+scalar DateTime
+
+type Agent {
+  id: ID!
+  instanceId: InstanceId!
+  registry: Registry!
+  status: AgentStatus!
+  hardwareRecords(filters: HardwareRecordFilter, pagination: OffsetPaginationInput): [HardwareRecord!]!
+  templates(filters: TemplateFilter, pagination: OffsetPaginationInput): [Template!]!
+  provisions(filters: ProvisionFilter, pagination: OffsetPaginationInput): [Provision!]!
+  lastSeen: DateTime
+  connected: Boolean!
+  extensions: [String!]!
+  name: String!
+  states: [State!]!
+  template(interface: String!): Template
+  active: Boolean!
+  latestHardwareRecord: HardwareRecord
+  pinned: Boolean!
+}
+
 """
-__doc__
+The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
 """
-input GroupFilter {
+scalar InstanceId
+
+type Registry {
+  id: ID!
+  app: App!
+  user: User!
+  agents(filters: AgentFilter, order: AgentOrder, pagination: OffsetPaginationInput): [Agent!]!
+}
+
+type User {
+  id: ID!
+}
+
+input AgentFilter {
+  clientId: String
+  instanceId: String
+  ids: [ID!]
+  extensions: [String!]
+  hasTemplates: [String!]
+  hasStates: [String!]
+  pinned: Boolean
+  AND: AgentFilter
+  OR: AgentFilter
+}
+
+input AgentOrder {
+  lastSeen: Ordering
+}
+
+enum AgentStatus {
+  ACTIVE
+  KICKED
+  DISCONNECTED
+  VANILLA
+}
+
+input HardwareRecordFilter {
+  ids: [ID!]
+  cpuVendorName: String
+  AND: HardwareRecordFilter
+  OR: HardwareRecordFilter
+}
+
+type Template {
+  id: ID!
+  interface: String!
+  extension: String!
+  agent: Agent!
+  node: Node!
+  params: AnyDefault!
+  dependencies(filters: DependencyFilter, pagination: OffsetPaginationInput): [Dependency!]!
+  provisions(filters: ProvisionFilter, pagination: OffsetPaginationInput): [Provision!]!
+  dependencyGraph: DependencyGraph!
+  name: String!
+  pinned: Boolean!
+}
+
+type Node {
+  id: ID!
+  hash: NodeHash!
+  name: String!
+  kind: NodeKind!
+  stateful: Boolean!
+  description: String
+  collections: [Collection!]!
+  templates(filters: TemplateFilter, pagination: OffsetPaginationInput): [Template!]!
+  scope: NodeScope!
+  isTestFor(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
+  isDev: Boolean!
+  tests(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
+  interfaces: [String!]!
+  protocols(filters: ProtocolFilter, order: ProtocolOrder, pagination: OffsetPaginationInput): [Protocol!]!
+  definedAt: DateTime!
+  reservations(filters: ReservationFilter, pagination: OffsetPaginationInput): [Reservation!]
+  testCases(filters: TestCaseFilter, pagination: OffsetPaginationInput): [TestCase!]
+  runs: [Assignation!]
+  dependencyGraph: DependencyGraph!
+  args: [Port!]!
+  returns: [Port!]!
+  portGroups: [PortGroup!]!
+  pinned: Boolean!
+}
+
+enum NodeKind {
+  FUNCTION
+  GENERATOR
+}
+
+type Collection {
+  id: ID!
+  name: String!
+  nodes(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
+}
+
+input NodeFilter {
   search: String
   name: StrFilterLookup
   ids: [ID!]
-  AND: GroupFilter
-  OR: GroupFilter
+  demands: [PortDemandInput!]
+  protocols: [String!]
+  kind: NodeKind
+  AND: NodeFilter
+  OR: NodeFilter
 }
 
-"\nA Profile of a User. A Profile can be used to display personalied information about a user.\n\n\n\n\n"
-type Profile {
-  """
-  A short bio of the user
-  """
-  bio: String!
-
-  """
-  The name of the user
-  """
-  name: String!
+input PortDemandInput {
+  kind: DemandKind!
+  matches: [PortMatchInput!] = null
+  forceLength: Int = null
+  forceNonNullableLength: Int = null
+  forceStructureLength: Int = null
 }
 
-type DjangoModelType {
-  pk: ID!
+enum DemandKind {
+  ARGS
+  RETURNS
 }
 
-"\nA Social Account is an account that is associated with a user. It can be used to authenticate the user with external services. It\ncan be used to store extra data about the user that is specific to the provider. We provide typed access to the extra data for\nsome providers. For others we provide a generic json field that can be used to store arbitrary data. Generic accounts are\nalways available, but typed accounts are only available for some providers.\n"
-interface SocialAccount {
-  """
-  The provider of the account. This can be used to determine the type of the account.
-  """
-  provider: ProviderType!
-
-  """
-  The unique identifier of the account. This is unique for the provider.
-  """
-  uid: String!
-
-  """
-  Extra data that is specific to the provider. This is a json field and can be used to store arbitrary data.
-  """
-  extraData: ExtraData!
+input PortMatchInput {
+  at: Int = null
+  key: String = null
+  kind: PortKind = null
+  identifier: String = null
+  nullable: Boolean = null
+  children: [PortMatchInput!] = null
 }
 
-"""
-The `ArrayLike` scalasr typsse represents a reference to a store previously created by the user n a datalayer
-"""
-scalar ExtraData
-
-"""
-A Paragraph of text
-"""
-type ParagraphDescendant implements Descendant {
-  """
-  Unsafe children are not typed and fall back to json. This is a workaround if queries get too complex.
-  """
-  unsafeChildren: [UnsafeChild!]
-  kind: DescendantKind!
-  children: [Descendant!]
-  size: String
+input NodeOrder {
+  definedAt: Ordering
 }
 
-"""
-A leaf of text. This is the most basic descendant and always ends a tree.
-"""
-type LeafDescendant implements Descendant {
-  """
-  Unsafe children are not typed and fall back to json. This is a workaround if queries get too complex.
-  """
-  unsafeChildren: [UnsafeChild!]
-  kind: DescendantKind!
-  children: [Descendant!]
-  bold: Boolean
-  italic: Boolean
-  underline: Boolean
-  text: String
-  code: String
-}
-
-"\nThe Generic Account is a Social Account that maps to a generic account. It provides information about the\nuser that is specific to the provider. This includes untyped extra data.\n\n"
-type GenericAccount implements SocialAccount {
-  """
-  The provider of the account. This can be used to determine the type of the account.
-  """
-  provider: ProviderType!
-
-  """
-  The unique identifier of the account. This is unique for the provider.
-  """
-  uid: String!
-  extraData: ExtraData!
-}
-
-"\nAn ORCID Account is a Social Account that maps to an ORCID Account. It provides information about the\nuser that is specific to the ORCID service. This includes the ORCID Identifier, the ORCID Preferences and\nthe ORCID Person. The ORCID Person contains information about the user that is specific to the ORCID service.\nThis includes the ORCID Activities, the ORCID Researcher URLs and the ORCID Addresses.\n\n"
-type OrcidAccount implements SocialAccount {
-  """
-  The provider of the account. This can be used to determine the type of the account.
-  """
-  provider: ProviderType!
-
-  """
-  The unique identifier of the account. This is unique for the provider.
-  """
-  uid: String!
-
-  """
-  Extra data that is specific to the provider. This is a json field and can be used to store arbitrary data.
-  """
-  extraData: ExtraData!
-
-  """
-  The ORCID Identifier of the user. The UID of the account is the same as the path of the identifier.
-  """
-  identifier: OrcidIdentifier!
-
-  """
-  Information about the person that is specific to the ORCID service.
-  """
-  person: OrcidPerson
-}
-
-"""
-The ORCID Identifier of a user. This is a unique identifier that is used to identify a user on the ORCID service. It is composed of a uri, a path and a host.
-"""
-type OrcidIdentifier {
-  """
-  The uri of the identifier
-  """
-  uri: String!
-
-  """
-  The path of the identifier
-  """
-  path: String!
-
-  """
-  The host of the identifier
-  """
-  host: String!
-}
-
-type OrcidPerson {
-  researcherUrls: [String!]!
-  addresses: [String!]!
-}
-
-type Query {
-  stashes(filters: StashFilter, pagination: OffsetPaginationInput): [Stash!]!
-  stashItems(
-    filters: StashItemFilter
-    pagination: OffsetPaginationInput
-  ): [StashItem!]!
-  apps: [App!]!
-  releases: [Release!]!
-  clients(filters: ClientFilter, pagination: OffsetPaginationInput): [Client!]!
-  compositions: [Composition!]!
-  users(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
-  groups(filters: GroupFilter, pagination: OffsetPaginationInput): [Group!]!
-  comments: [Comment!]!
-  rooms(filters: RoomFilter, pagination: OffsetPaginationInput): [Room!]!
-  redeemTokens(
-    filters: RedeemTokenFilter
-    pagination: OffsetPaginationInput
-  ): [RedeemToken!]!
-  stash(id: ID!): Stash!
-  stashItem(id: ID!): StashItem!
-  myStashes: [Stash!]!
-  user(id: ID!): User!
-  me: User!
-  group(id: ID!): Group!
-  mygroups: [Group!]!
-  room(id: ID!): Room!
-  stream(id: ID!): Stream!
-  app(
-    id: ID = null
-    identifier: AppIdentifier = null
-    clientId: ID = null
-  ): App!
-  release(
-    id: ID
-    identifier: AppIdentifier
-    version: Version
-    clientId: ID
-  ): Release!
-  client(id: ID = null, clientId: ID = null): Client!
-  myManagedClients(kind: ClientKind!): Client!
-  scopes: [Scope!]!
-  comment(id: ID!): Comment!
-  commentsFor(identifier: Identifier!, object: ID!): [Comment!]!
-  myMentions: [Comment!]!
-  myActiveMessages: [SystemMessage!]!
-  message(id: ID!): SystemMessage!
-  hallo: String!
-}
-
-"\nA Stash\n"
-type Stash {
-  id: ID!
-  name: String!
-  description: String
-  createdAt: DateTime!
-  updatedAt: DateTime!
-  isActive: Boolean!
-  items(
-    filters: StashItemFilter
-    pagination: OffsetPaginationInput
-  ): [StashItem!]!
-
-  """
-  The number of items in the stash
-  """
-  owner: User!
-}
-
-"""
-Date with time (isoformat)
-"""
-scalar DateTime
-
-"\nA stashed item\n"
-type StashItem {
-  id: ID!
-  identifier: String!
-  description: String
-  object: String!
-  addedAt: DateTime!
-  updatedAt: DateTime!
-}
-
-"""
-StashItem(id, stash, identifier, object, added_by, added_at, updated_at)
-"""
-input StashItemFilter {
-  search: String
-  username: StrFilterLookup
+input TemplateFilter {
+  interface: StrFilterLookup
   ids: [ID!]
-  stashes: [ID!]
-  AND: StashItemFilter
-  OR: StashItemFilter
+  nodeHash: NodeHash
+  node: TemplateNodeFilter
+  extension: String
+  agent: TemplateAgentFilter
+  parameters: [ParamPair!]
+  AND: TemplateFilter
+  OR: TemplateFilter
 }
 
-"""
-__doc__
-"""
-input StashFilter {
+input TemplateNodeFilter {
   search: String
+  name: String
   ids: [ID!]
-  AND: StashFilter
-  OR: StashFilter
+  demands: [PortDemandInput!]
+  protocols: [String!]
+  kind: NodeKind
+  AND: TemplateNodeFilter
+  OR: TemplateNodeFilter
 }
 
-"""
-An App is the Arkitekt equivalent of a Software Application. It is a collection of `Releases` that can be all part of the same application. E.g the App `Napari` could have the releases `0.1.0` and `0.2.0`.
-"""
-type App {
-  id: ID!
-
-  """
-  The name of the app
-  """
-  name: String!
-
-  """
-  The identifier of the app. This should be a globally unique string that identifies the app. We encourage you to use the reverse domain name notation. E.g. `com.example.myapp`
-  """
-  identifier: AppIdentifier!
-
-  """
-  The logo of the app. This should be a url to a logo that can be used to represent the app.
-  """
-  logo: String
-
-  """
-  The releases of the app. A release is a version of the app that can be installed by a user.
-  """
-  releases: [Release!]!
+input TemplateAgentFilter {
+  clientId: String
+  instanceId: String
+  ids: [ID!]
+  extensions: [String!]
+  hasTemplates: [String!]
+  hasStates: [String!]
+  AND: TemplateAgentFilter
+  OR: TemplateAgentFilter
 }
 
-"""
-The App identifier is a unique identifier for an app. It is used to identify the app in the database and in the code. We encourage you to use the reverse domain name notation. E.g. `com.example.myapp`
-"""
-scalar AppIdentifier
-
-"""
-A Release is a version of an app. Releases might change over time. E.g. a release might be updated to fix a bug, and the release might be updated to add a new feature. This is why they are the home for `scopes` and `requirements`, which might change over the release cycle.
-"""
-type Release {
-  id: ID!
-
-  """
-  The app that this release belongs to.
-  """
-  app: App!
-
-  """
-  The version of the release. This should be a string that identifies the version of the release. We enforce semantic versioning notation. E.g. `0.1.0`. The version is unique per app.
-  """
-  version: Version!
-
-  """
-  The name of the release. This should be a string that identifies the release beyond the version number. E.g. `canary`.
-  """
-  name: String!
-
-  """
-  The logo of the release. This should be a url to a logo that can be used to represent the release.
-  """
-  logo: String
-
-  """
-  The scopes of the release. Scopes are used to limit the access of a client to a user's data. They represent app-level permissions.
-  """
-  scopes: [String!]!
-
-  """
-  The requirements of the release. Requirements are used to limit the access of a client to a user's data. They represent app-level permissions.
-  """
-  requirements: [String!]!
-
-  """
-  The clients of the release
-  """
-  clients(filters: ClientFilter, pagination: OffsetPaginationInput): [Client!]!
-}
-
-"""
-The `Version` represents a semver version string
-"""
-scalar Version
-
-"""
-A client is a way of authenticating users with a release.
- The strategy of authentication is defined by the kind of client. And allows for different authentication flow.
- E.g a client can be a DESKTOP app, that might be used by multiple users, or a WEBSITE that wants to connect to a user's account,
- but also a DEVELOPMENT client that is used by a developer to test the app. The client model thinly wraps the oauth2 client model, which is used to authenticate users.
-"""
-type Client {
-  id: ID!
-
-  """
-  The release that this client belongs to.
-  """
-  release: Release!
-
-  """
-  The user that manages this release.
-  """
-  tenant: User!
-
-  """
-  The configuration of the client. This is the configuration that will be sent to the client. It should never contain sensitive information.
-  """
-  kind: ClientKind!
-
-  """
-  The real oauth2 client that is used to authenticate users with this client.
-  """
-  oauth2Client: Oauth2Client!
-
-  """
-  Is this client public? If a client is public
-  """
-  public: Boolean!
-
-  """
-  The composition of the client.
-  """
-  composition: Composition!
-
-  """
-  If the client is a DEVELOPMENT client, which requires no further authentication, this is the user that is authenticated with the client.
-  """
-  user: User
-
-  """
-  The configuration of the client. This is the configuration that will be sent to the client. It should never contain sensitive information.
-  """
-  token: String!
-}
-
-enum ClientKind {
-  DEVELOPMENT
-  WEBSITE
-  DESKTOP
-}
-
-"""
-Application(id, client_id, user, redirect_uris, post_logout_redirect_uris, client_type, authorization_grant_type, client_secret, name, skip_authorization, created, updated, algorithm)
-"""
-type Oauth2Client {
-  id: ID!
-  name: String!
-  user: User!
-  clientType: String!
-  clientId: String!
-  algorithm: String!
-  authorizationGrantType: String!
-
-  """
-  Allowed URIs list, space separated
-  """
-  redirectUris: String!
-}
-
-"""
-A template for a configuration
-"""
-type Composition {
-  id: ID!
-
-  """
-  The name of the composition
-  """
-  name: String!
-
-  """
-  The template of the composition. This is a Jinja2 YAML template that will be rendered with the LinkingContext as context. The result of the rendering will be used to send to the client as a configuration. It should never contain sensitive information.
-  """
-  template: String!
-
-  """
-  The mappings of the composition. A mapping is a mapping of a service to a service instance. This is used to configure the composition.
-  """
-  mappings: [ServiceInstanceMapping!]!
-}
-
-"""
-A ServiceInstance is a configured instance of a Service. It will be configured by a configuration backend and will be used to send to the client as a configuration. It should never contain sensitive information.
-"""
-type ServiceInstanceMapping {
-  id: ID!
-
-  """
-  The service that this instance belongs to.
-  """
-  instance: ServiceInstance!
-
-  """
-  The composition that this instance belongs to.
-  """
-  composition: Composition!
-
-  """
-  The key of the instance. This is a unique string that identifies the instance. It is used to identify the instance in the code and in the database.
-  """
+input ParamPair {
   key: String!
-}
-
-"""
-A ServiceInstance is a configured instance of a Service. It will be configured by a configuration backend and will be used to send to the client as a configuration. It should never contain sensitive information.
-"""
-type ServiceInstance {
-  id: ID!
-
-  """
-  The service that this instance belongs to.
-  """
-  service: Service!
-
-  """
-  The backend that this instance belongs to.
-  """
-  backend: BackendType!
-
-  """
-  The composition that this instance belongs to.
-  """
-  composition: Composition!
-
-  """
-  The name of the instance. This is a human readable name of the instance.
-  """
-  name: String!
-
-  """
-  The identifier of the instance. This is a unique string that identifies the instance. It is used to identify the instance in the code and in the database.
-  """
-  identifier: String!
-}
-
-"""
-A Service is a Webservice that a Client might want to access. It is not the configured instance of the service, but the service itself.
-"""
-type Service {
-  """
-  The key of the service. This is a unique string that identifies the service. It is used to identify the service in the code and in the database.
-  """
-  key: String!
-  id: ID!
-
-  """
-  The name of the service
-  """
-  name: String!
-
-  """
-  The identifier of the service. This should be a globally unique string that identifies the service. We encourage you to use the reverse domain name notation. E.g. `com.example.myservice`
-  """
-  identifier: ServiceIdentifier!
-
-  """
-  The logo of the service. This should be a url to a logo that can be used to represent the service.
-  """
-  logo: String!
-
-  """
-  The description of the service. This should be a human readable description of the service.
-  """
-  description: String!
-}
-
-"""
-The Service identifier is a unique identifier for a service. It is used to identify the service in the database and in the code. We encourage you to use the reverse domain name notation. E.g. `com.example.myservice`
-"""
-scalar ServiceIdentifier
-
-enum BackendType {
-  DockerBackend
-  ConfigBackend
-}
-
-"""
-Client(id, composition, release, oauth2_client, kind, public, token, client_id, client_secret, tenant, user, created_at)
-"""
-input ClientFilter {
-  search: String
-  ids: [ID!]
-  AND: ClientFilter
-  OR: ClientFilter
-}
-
-"""
-Comments represent the comments of a user on a specific data item
-tart are identified by the unique combination of `identifier` and `object`.
-E.g a comment for an Image on the Mikro services would be serverd as
-`@mikro/image:imageID`.
-
-Comments always belong to the user that created it. Comments in threads
-get a parent attribute set, that points to the immediate parent.
-
-Each comment contains multiple descendents, that make up a *rich* representation
-of the underlying comment data including potential mentions, or links, or
-paragraphs.
-"""
-type Comment {
-  id: ID!
-
-  """
-  The object id of the object, on its associated service
-  """
-  object: String!
-
-  """
-  The identifier of the object. Consult the documentation for the format
-  """
-  identifier: Identifier!
-
-  """
-  The children of this comment
-  """
-  children: [Comment!]!
-
-  """
-  The parent of this comment. Think Thread
-  """
-  parent: Comment
-
-  """
-  The time this comment got created
-  """
-  createdAt: DateTime!
-
-  """
-  The users that got mentioned in this comment
-  """
-  mentions(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
-
-  """
-  The user that resolved this comment
-  """
-  resolvedBy: User
-
-  """
-  The user that created this comment
-  """
-  user: User!
-
-  """
-  The immediate descendends of the comments. Think typed Rich Representation
-  """
-  descendants: [Descendant!]!
-  resolved: Boolean!
-}
-
-"""
-The `Identifier` scalasr typsse represents a reference to a store previously created by the user n a datalayer
-"""
-scalar Identifier
-
-"""
-Room(id, title, description, creator)
-"""
-type Room {
-  id: ID!
-
-  """
-  The Title of the Room
-  """
-  title: String!
-  description: String!
-  messages(
-    filters: MessageFilter
-    pagination: OffsetPaginationInput
-  ): [Message!]!
-  agents(pagination: OffsetPaginationInput): [Agent!]!
-  streams: [Stream!]!
-}
-
-"""
-Message represent the message of an agent on a room
-"""
-type Message {
-  id: ID!
-  title: String!
-
-  """
-  A clear text representation of the rich comment
-  """
-  text: String!
-
-  """
-  The user that created this comment
-  """
-  agent: Agent!
-  attachedStructures(pagination: OffsetPaginationInput): [Structure!]!
-}
-
-"""
-Agent(id, room, name, app, user)
-"""
-type Agent {
-  id: ID!
-  room: Room!
-}
-
-"""
-Structure(id, identifier, object)
-"""
-type Structure {
-  id: ID!
-
-  """
-  The object id of the object, on its associated service
-  """
-  object: ID!
-
-  """
-  The identifier of the object. Consult the documentation for the format
-  """
-  identifier: String!
-}
-
-"""
-Message represent the message of an agent on a room
-"""
-input MessageFilter {
-  ids: [ID!]
-  search: String
-  AND: MessageFilter
-  OR: MessageFilter
-}
-
-"""
-Stream(id, agent, title, token)
-"""
-type Stream {
-  id: ID!
-
-  """
-  The agent that created this stream
-  """
-  agent: Agent!
-
-  """
-  The Title of the Stream
-  """
-  title: String!
-  token: String!
-}
-
-"""
-Room(id, title, description, creator)
-"""
-input RoomFilter {
-  search: String
-  ids: [ID!]
-  AND: RoomFilter
-  OR: RoomFilter
-}
-
-"""
-A redeem token is a token that can be used to redeed the rights to create
-a client. It is used to give the recipient the right to create a client.
-
-If the token is not redeemed within the expires_at time, it will be invalid.
-If the token has been redeemed, but the manifest has changed, the token will be invalid.
-"""
-type RedeemToken {
-  id: ID!
-
-  """
-  The token of the redeem token
-  """
-  token: String!
-
-  """
-  The client that this redeem token belongs to.
-  """
-  client: Client
-
-  """
-  The user that this redeem token belongs to.
-  """
-  user: User!
-}
-
-"""
-A redeem token is a token that can be used to redeed the rights to create
-a client. It is used to give the recipient the right to create a client.
-
-If the token is not redeemed within the expires_at time, it will be invalid.
-If the token has been redeemed, but the manifest has changed, the token will be invalid.
-"""
-input RedeemTokenFilter {
-  search: String
-  ids: [ID!]
-  AND: RedeemTokenFilter
-  OR: RedeemTokenFilter
-}
-
-"""
-A scope that can be assigned to a client. Scopes are used to limit the access of a client to a user's data. They represent app-level permissions.
-"""
-type Scope {
-  """
-  The label of the scope. This is the human readable name of the scope.
-  """
-  label: String!
-
-  """
-  The description of the scope. This is a human readable description of the scope.
-  """
-  description: String!
-
-  """
-  The value of the scope. This is the value that is used in the OAuth2 flow.
-  """
   value: String!
 }
 
-"\nA System Message is a message that is sent to a user. \nIt can be used to notify the user of important events or to request their attention.\nSystem messages can use Rekuest Hooks as actions to allow the user to interact with the message.\n\n\n"
-type SystemMessage {
+enum NodeScope {
+  GLOBAL
+  LOCAL
+  BRIDGE_GLOBAL_TO_LOCAL
+  BRIDGE_LOCAL_TO_GLOBAL
+}
+
+type Protocol {
   id: ID!
-  title: String!
-  message: String!
+  name: String!
+  nodes(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
+}
+
+input ProtocolFilter {
+  search: String
+  name: StrFilterLookup
+  ids: [ID!]
+  AND: ProtocolFilter
+  OR: ProtocolFilter
+}
+
+input ProtocolOrder {
+  name: Ordering
+}
+
+type Reservation {
+  id: ID!
+  name: String!
+  waiter: Waiter!
+  title: String
+  node: Node!
+  status: ReservationEventKind!
+  updatedAt: DateTime!
+  reference: String!
+  provisions(filters: ProvisionFilter, pagination: OffsetPaginationInput): [Provision!]!
+  binds: Binds
+  causingDependency: Dependency
+  causingProvision: Provision
+  strategy: ReservationStrategy!
+  viable: Boolean!
+  happy: Boolean!
+  template: Template
+  dependencyGraph: DependencyGraph!
+  events: [ReservationEvent!]!
+}
+
+type Waiter {
+  id: ID!
+  instanceId: InstanceId!
+  registry: Registry!
+}
+
+enum ReservationEventKind {
+  PENDING
+  CREATE
+  RESCHEDULE
+  DELETED
+  CHANGE
+  ACTIVE
+  INACTIVE
+  UNCONNECTED
+  ENDED
+  UNHAPPY
+  HAPPY
+  LOG
+}
+
+type Provision {
+  id: ID!
+  name: String!
+  agent: Agent!
+  template: Template!
+  status: ProvisionEventKind!
+  causedReservations(filters: ReservationFilter, pagination: OffsetPaginationInput): [Reservation!]!
+  provided: Boolean!
+  active: Boolean!
+  dependenciesMet: Boolean!
+}
+
+enum ProvisionEventKind {
+  CHANGE
+  UNHAPPY
+  PENDING
+  CRITICAL
+  DENIED
+  ACTIVE
+  REFUSED
+  INACTIVE
+  CANCELING
+  DISCONNECTED
+  RECONNECTING
+  ERROR
+  ENDED
+  CANCELLED
+  BOUND
+  PROVIDING
+  LOG
+}
+
+input ReservationFilter {
+  waiter: WaiterFilter
+  ids: [ID!]
+  status: [ReservationStatus!]
+  AND: ReservationFilter
+  OR: ReservationFilter
+}
+
+input WaiterFilter {
+  instanceId: InstanceId!
+  ids: [ID!]
+  AND: WaiterFilter
+  OR: WaiterFilter
+}
+
+enum ReservationStatus {
+  ACTIVE
+  INACTIVE
+  UNHAPPY
+  HAPPY
+  UNCONNECTED
+  ENDED
+}
+
+input ProvisionFilter {
+  agent: AgentFilter
+  ids: [ID!]
+  status: [ProvisionStatus!]
+  AND: ProvisionFilter
+  OR: ProvisionFilter
+}
+
+enum ProvisionStatus {
+  DENIED
+  PENDING
+  BOUND
+  PROVIDING
+  ACTIVE
+  REFUSED
+  INACTIVE
+  CANCELING
+  DISCONNECTED
+  RECONNECTING
+  ERROR
+  CRITICAL
+  ENDED
+  CANCELLED
+}
+
+type Binds {
+  templates: [ID!]!
+  clients: [ID!]!
+  desiredInstances: Int!
+}
+
+type Dependency {
+  id: ID!
+  template: Template!
+  node: Node
+  hash: NodeHash!
+  initialHash: NodeHash!
+  reference: String
+  optional: Boolean!
+  binds: Binds
+  resolvable: Boolean!
+}
+
+enum ReservationStrategy {
+  RANDOM
+  ROUND_ROBIN
+  LEAST_BUSY
+  LEAST_TIME
+  LEAST_LOAD
+  DIRECT
+}
+
+type DependencyGraph {
+  nodes: [NodeNodeInvalidNodeTemplateNode!]!
+  edges: [DependencyEdgeImplementationEdge!]!
+}
+
+union NodeNodeInvalidNodeTemplateNode = NodeNode | InvalidNode | TemplateNode
+
+type NodeNode {
+  id: String!
+  nodeId: String!
+  name: String!
+  status: String
+  reservationId: String
+}
+
+type InvalidNode {
+  id: String!
+  initialHash: String!
+}
+
+type TemplateNode {
+  id: String!
+  templateId: String!
+  interface: String!
+  clientId: String!
+  status: String
+  provisionId: String
+  reservationId: String
+  linked: Boolean!
+  active: Boolean!
+}
+
+union DependencyEdgeImplementationEdge = DependencyEdge | ImplementationEdge
+
+type DependencyEdge {
+  id: String!
+  source: String!
+  target: String!
+  optional: Boolean!
+  depId: String!
+  reservationId: String
+}
+
+type ImplementationEdge {
+  id: String!
+  source: String!
+  target: String!
+  reservationId: String
+  linked: Boolean!
+}
+
+type ReservationEvent {
+  id: ID!
+  reservation: Reservation!
+  kind: ReservationEventKind!
+  level: LogLevel
+  createdAt: DateTime!
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  ERROR
+  WARN
+  CRITICAL
+}
+
+type TestCase {
+  id: ID!
+  tester: Node!
+  node: Node!
+  isBenchmark: Boolean!
+  description: String!
+  name: String!
+  results(filters: TestResultFilter, pagination: OffsetPaginationInput): [TestResult!]!
+}
+
+type TestResult {
+  id: ID!
+  template: Template!
+  tester: Template!
+  case: TestCase!
+  passed: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input TestResultFilter {
+  name: StrFilterLookup
+  ids: [ID!]
+  AND: TestResultFilter
+  OR: TestResultFilter
+}
+
+input TestCaseFilter {
+  name: StrFilterLookup
+  ids: [ID!]
+  AND: TestCaseFilter
+  OR: TestCaseFilter
+}
+
+type Assignation {
+  id: ID!
+  name: String!
+  reference: String
+  args: AnyDefault!
 
   """
-  The action to take (e.g. the node)
+  A mother assignation is the root assignation that caused this assignation to be created. This mother is always created by intent (e.g a user action). If null, this assignation is the mother
   """
-  action: String!
-  user: User!
+  mother: Assignation
+
+  """
+  A parent assignation is the next assignation in the chain of assignations that caused this assignation to be created. Parents can be created by intent or by the system. If null, this assignation is the parent
+  """
+  parent: Assignation
+
+  """
+  If this assignation is the result of a reservation, this field will contain the reservation that caused this assignation to be created
+  """
+  reservation: Reservation
+
+  """The node that this assignation is assigned to"""
+  node: Node!
+
+  """If set, this assignation was directly assigned to a template"""
+  template: Template
+
+  """The status of this assignation"""
+  status: AssignationEventKind!
+  statusMessage: String
+
+  """The Waiter that this assignation was created by"""
+  waiter: Waiter!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """The provision that this assignation was assigned to"""
+  provision: Provision
+  events: [AssignationEvent!]!
+  arg(key: String!): Args
+}
+
+enum AssignationEventKind {
+  BOUND
+  QUEUED
+  ASSIGN
+  PROGRESS
+  DISCONNECTED
+  YIELD
+  DONE
+  LOG
+  CANCELING
+  CANCELLED
+  INTERUPTING
+  INTERUPTED
+  ERROR
+  CRITICAL
+}
+
+type AssignationEvent {
+  id: ID!
+  name: String!
+  returns: AnyDefault
+  assignation: Assignation!
+  kind: AssignationEventKind!
+  message: String
+  level: LogLevel
+  progress: Int
+  createdAt: DateTime!
+  reference: String!
+}
+
+"""The `Args` scalar type represents a Dictionary of arguments"""
+scalar Args
+
+type Port {
+  key: String!
+  scope: PortScope!
+  label: String
+  kind: PortKind!
+  description: String
+  identifier: Identifier
+  nullable: Boolean!
+  effects: [Effect!]
+  default: AnyDefault
+  children: [ChildPort!]
+  assignWidget: AssignWidget
+  returnWidget: ReturnWidget
+  groups: [String!]
+  validators: [Validator!]
+}
+
+type Validator {
+  function: ValidatorFunction!
+  dependencies: [String!]
+  label: String
+  errorMessage: String
+}
+
+"\n    The `Validator` scalar represents a javascript function that should execute on the client side (inside a shadow realm)\n      to validate a value (or a set of values) before it is sent to the server.  The function has two parameters (value, otherValues) and should return a string if the value is invalid and undefined if the value is valid.\n        The otherValues parameter is an object with the other values in the form {fieldName: value}."
+scalar ValidatorFunction
+
+type PortGroup {
+  key: String!
+  hidden: Boolean!
+}
+
+input DependencyFilter {
+  ids: [ID!]
+  AND: DependencyFilter
+  OR: DependencyFilter
+}
+
+type State {
+  id: ID!
+  stateSchema: StateSchema!
+  value: Args!
+  agent: Agent!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  historicalStates: [HistoricalState!]!
+}
+
+type StateSchema {
+  id: ID!
+  hash: String!
+  name: String!
+  ports: [Port!]!
+}
+
+type HistoricalState {
+  id: ID!
+  state: State!
+  value: Args!
+  archivedAt: DateTime!
+}
+
+type Dashboard {
+  id: ID!
+  name: String
+  panels: [Panel!]
+  uiTree: UITree
+}
+
+type Panel {
+  id: ID!
+  kind: PanelKind!
+  name: String!
+  reservation: Reservation
+  state: State
+  accessors: [String!]
+  submitOnLoad: Boolean!
+  submitOnChange: Boolean!
+}
+
+enum PanelKind {
+  STATE
+  ASSIGN
+}
+
+type UITree {
+  child: UIChild!
 }
 
 type Mutation {
-  createUser(input: CreateUserInput!): User!
-  createComment(input: CreateCommentInput!): Comment!
-  createRoom(input: CreateRoomInput!): Room!
-  send(input: SendMessageInput!): Message!
-  replyTo(input: ReplyToCommentInput!): Comment!
-  resolveComment(input: ResolveCommentInput!): Comment!
-  createDevelopmentalClient(input: DevelopmentClientInput!): Client!
-  scan(input: ScanBackendInput!): String!
-  render(input: RenderInput!): Fakt!
-  acknowledgeMessage(input: AcknowledgeMessageInput!): SystemMessage!
+  createTemplate(input: CreateTemplateInput!): Template!
+  createForeignTemplate(input: CreateForeignTemplateInput!): Template!
+  setExtensionTemplates(input: SetExtensionTemplatesInput!): [Template!]!
+  ack(input: AckInput!): Assignation!
+  assign(input: AssignInput!): Assignation!
+  cancel(input: CancelInput!): Assignation!
+  interrupt(input: InterruptInput!): Assignation!
 
-  """
-  Create a new stash
-  """
-  createStash(input: CreateStashInput!): Stash!
+  """Provide a provision"""
+  provide(input: ProvideInput!): Provision!
+  reserve(input: ReserveInput!): Reservation!
+  link(input: LinkInput!): Provision!
+  unlink(input: UnlinkInput!): Provision!
+  unreserve(input: UnreserveInput!): String!
 
-  """
-  Update a stash
-  """
-  updateStash(input: UpdateStashInput!): Stash!
-
-  """
-  Add items to a stash
-  """
-  addItemsToStash(input: AddItemToStashInput!): [StashItem!]!
-
-  """
-  Delete items from a stash
-  """
-  deleteStashItems(input: DeleteStashItems!): [ID!]!
-  deleteStash(input: DeleteStashInput!): ID!
-  createStream(input: CreateStreamInput!): Stream!
-  leaveStream(input: LeaveStreamInput!): Stream!
-  joinStream(input: JoinStreamInput!): Stream!
+  """Delete a template"""
+  deleteTemplate(input: DeleteTemplateInput!): String!
+  ensureAgent(input: AgentInput!): Agent!
+  createTestCase(input: CreateTestCaseInput!): TestCase!
+  createTestResult(input: CreateTestResultInput!): TestResult!
+  activate(input: ActivateInput!): Provision!
+  deactivate(input: DeActivateInput!): Provision!
+  createHardwareRecord(input: CreateHardwareRecordInput!): HardwareRecord!
+  createDashboard(input: CreateDashboardInput!): Dashboard!
+  createStateSchema(input: CreateStateSchemaInput!): StateSchema!
+  createPanel(input: CreatePanelInput!): Panel!
+  setState(input: SetStateInput!): State!
+  updateState(input: UpdateStateInput!): State!
+  archiveState(input: ArchiveStateInput!): StateSchema!
+  pinAgent(input: PinInput!): Agent!
+  pinTemplate(input: PinInput!): Template!
+  reinit(input: ReInitInput!): String!
+  unprovide(input: UnProvideInput!): ID!
+  deleteAgent(input: DeleteAgentInput!): ID!
 }
 
-input CreateUserInput {
-  name: String!
+input CreateTemplateInput {
+  template: TemplateInput!
+  instanceId: InstanceId!
+  extension: String!
 }
 
-input CreateCommentInput {
-  descendants: [DescendantInput!]!
-  identifier: Identifier!
-  object: ID!
-  parent: ID = null
-  notify: Boolean = false
-}
-
-input DescendantInput {
-  kind: DescendantKind!
-  children: [DescendantInput!] = null
-  user: String = null
-  bold: Boolean = null
-  italic: Boolean = null
-  code: Boolean = null
-  text: String = null
-}
-
-input CreateRoomInput {
-  description: String = null
-  title: String = null
-}
-
-input SendMessageInput {
-  room: ID!
-  agentId: String!
-  text: String!
-  parent: ID = null
-  notify: Boolean = null
-  attachStructures: [StructureInput!] = null
-}
-
-input StructureInput {
-  object: ID!
-  identifier: String!
-}
-
-input ReplyToCommentInput {
-  descendants: [DescendantInput!]!
-  parent: ID
-  notify: Boolean
-}
-
-input ResolveCommentInput {
-  id: ID!
-  notify: Boolean
-}
-
-input DevelopmentClientInput {
-  manifest: ManifestInput!
-  composition: ID = null
-  requirements: [Requirement!]! = []
-}
-
-input ManifestInput {
-  identifier: String!
-  version: String!
+input TemplateInput {
+  definition: DefinitionInput!
+  dependencies: [DependencyInput!]!
+  interface: String!
+  params: AnyDefault = null
+  dynamic: Boolean! = false
   logo: String = null
-  scopes: [String!]! = []
 }
 
-input Requirement {
-  service: String!
-  optional: Boolean! = false
+input DefinitionInput {
   description: String = null
-  key: String!
-}
-
-input ScanBackendInput {
-  backend: String = null
-}
-
-"""
-The `Fakt` scalar type represents a reference to a fakt
-"""
-scalar Fakt
-
-input RenderInput {
-  client: ID!
-  composition: ID = null
-  request: LinkingRequestInput = null
-  manifest: ManifestInput = null
-}
-
-input LinkingRequestInput {
-  host: String!
-  port: String!
-  isSecure: Boolean! = false
-}
-
-input AcknowledgeMessageInput {
-  id: ID!
-  acknowledged: Boolean!
-}
-
-input CreateStashInput {
-  name: String = null
-  description: String = null
-}
-
-input UpdateStashInput {
-  stash: ID!
+  collections: [String!]! = []
   name: String!
+  stateful: Boolean! = false
+  portGroups: [PortGroupInput!]! = []
+  args: [PortInput!]! = []
+  returns: [PortInput!]! = []
+  kind: NodeKind!
+  isTestFor: [String!]! = []
+  interfaces: [String!]! = []
+  isDev: Boolean! = false
+}
+
+input PortGroupInput {
+  key: String!
+  hidden: Boolean!
+}
+
+input PortInput {
+  validators: [ValidatorInput!] = null
+  key: String!
+  scope: PortScope!
+  label: String = null
+  kind: PortKind!
+  description: String = null
+  identifier: String = null
+  nullable: Boolean! = false
+  effects: [EffectInput!] = null
+  default: AnyDefault = null
+  children: [ChildPortInput!] = null
+  assignWidget: AssignWidgetInput = null
+  returnWidget: ReturnWidgetInput = null
+  groups: [String!] = null
+}
+
+input ValidatorInput {
+  function: ValidatorFunction!
+  dependencies: [String!] = []
+  label: String = null
+  errorMessage: String = null
+}
+
+input EffectInput {
+  label: String!
+  description: String
+  dependencies: [EffectDependencyInput!]!
+  kind: EffectKind!
+}
+
+input EffectDependencyInput {
+  key: String!
+  condition: LogicalCondition!
+  value: AnyDefault!
+}
+
+input ChildPortInput {
+  default: AnyDefault = null
+  key: String!
+  label: String = null
+  kind: PortKind!
+  scope: PortScope!
+  description: String = null
+  identifier: Identifier = null
+  nullable: Boolean!
+  children: [ChildPortInput!] = null
+  effects: [EffectInput!] = null
+  assignWidget: AssignWidgetInput = null
+  returnWidget: ReturnWidgetInput = null
+}
+
+input AssignWidgetInput {
+  asParagraph: Boolean = null
+  kind: AssignWidgetKind!
+  query: SearchQuery = null
+  choices: [ChoiceInput!] = null
+  stateChoices: String = null
+  followValue: String = null
+  min: Float = null
+  max: Float = null
+  step: Float = null
+  placeholder: String = null
+  hook: String = null
+  ward: String = null
+  fallback: AssignWidgetInput = null
+  filters: [ChildPortInput!] = null
+}
+
+"""
+The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
+"""
+scalar SearchQuery
+
+input ChoiceInput {
+  value: AnyDefault!
+  label: String!
   description: String = null
 }
 
-input AddItemToStashInput {
-  stash: ID!
-  items: [StashItemInput!]!
+input ReturnWidgetInput {
+  kind: ReturnWidgetKind!
+  query: SearchQuery = null
+  choices: [ChoiceInput!] = null
+  min: Int = null
+  max: Int = null
+  step: Int = null
+  placeholder: String = null
+  hook: String = null
+  ward: String = null
 }
 
-input StashItemInput {
-  identifier: String!
-  description: String = null
-  object: String!
+input DependencyInput {
+  hash: NodeHash
+  reference: String = null
+  binds: BindsInput = null
+  optional: Boolean! = false
+  viableInstances: Int = null
 }
 
-input DeleteStashItems {
-  items: [ID!]!
+input BindsInput {
+  templates: [String!] = null
+  clients: [String!] = null
+  desiredInstances: Int! = 1
 }
 
-input DeleteStashInput {
-  stash: ID!
+input CreateForeignTemplateInput {
+  agent: ID!
+  template: TemplateInput!
+  extension: String!
 }
 
-input CreateStreamInput {
-  room: ID!
+input SetExtensionTemplatesInput {
+  templates: [TemplateInput!]!
+  instanceId: InstanceId!
+  extension: String!
+  runCleanup: Boolean! = false
+}
+
+input AckInput {
+  assignation: ID!
+}
+
+input AssignInput {
+  instanceId: InstanceId!
+  node: ID = null
+  template: ID = null
+  reservation: ID = null
+  hooks: [HookInput!] = null
+  args: Args!
+  reference: String = null
+  parent: ID = null
+  cached: Boolean! = false
+  log: Boolean! = false
+  ephemeral: Boolean! = false
+  isHook: Boolean! = false
+}
+
+input HookInput {
+  kind: HookKind!
+  hash: String!
+}
+
+enum HookKind {
+  CLEANUP
+  INIT
+}
+
+input CancelInput {
+  assignation: ID!
+}
+
+input InterruptInput {
+  assignation: ID!
+}
+
+input ProvideInput {
+  provision: ID!
+}
+
+input ReserveInput {
+  assignationId: String = null
+  instanceId: InstanceId!
+  node: ID = null
+  template: ID = null
   title: String = null
-  agentId: String = null
+  hash: NodeHash = null
+  reference: String = null
+  binds: BindsInput = null
 }
 
-input LeaveStreamInput {
+input LinkInput {
+  provision: ID!
+  reservation: ID!
+}
+
+input UnlinkInput {
+  provision: ID!
+  reservation: ID!
+}
+
+input UnreserveInput {
+  reservation: ID!
+}
+
+input DeleteTemplateInput {
+  template: ID!
+}
+
+input AgentInput {
+  instanceId: InstanceId!
+  name: String = null
+  extensions: [String!] = null
+}
+
+input CreateTestCaseInput {
+  node: ID!
+  tester: ID!
+  description: String = null
+  name: String = null
+}
+
+input CreateTestResultInput {
+  case: ID!
+  tester: ID!
+  template: ID!
+  passed: Boolean!
+  result: String = null
+}
+
+input ActivateInput {
+  provision: ID!
+}
+
+input DeActivateInput {
+  provision: ID!
+}
+
+input CreateHardwareRecordInput {
+  cpuCount: Int = null
+  cpuFrequency: Float = null
+  cpuVendorName: String = null
+  instanceId: InstanceId = null
+}
+
+input CreateDashboardInput {
+  name: String = null
+  panels: [ID!] = null
+  tree: UITreeInput = null
+}
+
+input UITreeInput {
+  child: UIChildInput!
+}
+
+input UIChildInput {
+  state: String = null
+  kind: UIChildKind!
+  hidden: Boolean
+  children: [UIChildInput!] = null
+  left: UIChildInput = null
+  right: UIChildInput = null
+}
+
+input CreateStateSchemaInput {
+  stateSchema: StateSchemaInput!
+}
+
+input StateSchemaInput {
+  ports: [PortInput!]!
+  name: String!
+}
+
+input CreatePanelInput {
+  name: String!
+  kind: PanelKind!
+  state: ID = null
+  stateKey: String = null
+  reservation: ID = null
+  instanceId: InstanceId = null
+  stateAccessors: [String!] = null
+  interface: String = null
+  args: Args = null
+  submitOnChange: Boolean = false
+  submitOnLoad: Boolean = false
+}
+
+input SetStateInput {
+  stateSchema: ID!
+  instanceId: InstanceId!
+  value: Args!
+}
+
+input UpdateStateInput {
+  stateSchema: ID!
+  instanceId: InstanceId!
+  patches: [Args!]!
+}
+
+input ArchiveStateInput {
+  stateSchema: ID!
+}
+
+input PinInput {
   id: ID!
+  pin: Boolean!
 }
 
-input JoinStreamInput {
+input ReInitInput {
+  agent: ID = null
+}
+
+input UnProvideInput {
+  provision: ID!
+}
+
+input DeleteAgentInput {
   id: ID!
 }
 
 type Subscription {
-  communications(channels: [ID!]!): Communication!
-  mentions: Comment!
-  room(room: ID!, agentId: ID!, filterOwn: Boolean! = true): RoomEvent!
+  newNodes(cage: ID!): Node!
+  assignations(instanceId: InstanceId!): AssignationChangeEvent!
+  reservations(instanceId: InstanceId!): Reservation!
+  assignationEvents(instanceId: InstanceId!): AssignationEvent!
+  reservationEvents(instanceId: InstanceId!): ReservationEvent!
+  provisionEvents(instanceId: InstanceId!): ProvisionEvent!
+  templateChange(template: ID!): Template!
+  templates(agent: ID!): TemplateUpdate!
+  stateUpdateEvents(stateId: ID!): State!
 }
 
-"""
-A Communication
-"""
-type Communication {
-  channel: ID!
+type AssignationChangeEvent {
+  event: AssignationEvent
+  create: Assignation
 }
 
-type RoomEvent {
-  message: Message
-  join: Agent
-  leave: Agent
+type ProvisionEvent {
+  id: ID!
+  provision: Provision!
+  kind: ProvisionEventKind!
+  level: LogLevel
+  createdAt: DateTime!
+}
+
+type TemplateUpdate {
+  create: Template!
+  update: Template!
+  delete: ID!
 }

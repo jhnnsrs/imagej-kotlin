@@ -1,7 +1,8 @@
 
 plugins {
-    kotlin("jvm") version "2.0.0"
-    kotlin("kapt") version "2.0.0"
+    kotlin("jvm") version "2.1.0"
+    kotlin("kapt") version "2.1.0"
+    kotlin("plugin.serialization") version "2.1.0"
     id("com.apollographql.apollo") version "4.0.0"
 }
 
@@ -14,6 +15,7 @@ repositories {
     mavenCentral()
     maven("https://maven.imagej.net/content/groups/public")
     maven("https://repo.maven.apache.org/maven2")
+    maven("https://maven.scijava.org/content/groups/public")
 }
 
 dependencies {
@@ -23,6 +25,20 @@ dependencies {
     implementation("com.apollographql.apollo:apollo-runtime:4.0.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing")
+    implementation("org.janelia.saalfeldlab:n5-ij:4.0.2")
+    implementation("org.janelia.saalfeldlab:n5-zarr")
+    implementation("dev.zarr:zarr-java:0.0.4")
+    implementation("com.amazonaws:aws-java-sdk-s3:1.12.780")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0-RC")
+
+
+
+
+    implementation("io.ktor:ktor-client-core:3.0.2")
+    implementation("io.ktor:ktor-client-cio:3.0.2")
+    implementation("io.ktor:ktor-client-websockets:3.0.2")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:null")
 
 }
 
@@ -33,6 +49,7 @@ kotlin {
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
     kotlinOptions {
         jvmTarget = "1.8"
+
     }
 }
 
@@ -44,11 +61,29 @@ tasks.withType<JavaCompile> {
 
 
 apollo {
-  service("graphql") {
-    packageName.set("com.mycompany.imagej")
-    introspection {
-      endpointUrl.set("http://127.0.0.1/lok/graphql")
-      schemaFile.set(file("src/main/graphql/schema.graphqls"))
+    service("lok") {
+        packageName.set("com.mycompany.lok.graphql")
+        srcDir("src/main/graphql/lok")
+        introspection {
+          endpointUrl.set("http://127.0.0.1/lok/graphql")
+          schemaFile.set(file("src/main/graphql/lok/schema.graphqls"))
+
+        }
     }
-  }
+    service("mikro") {
+        packageName.set("com.mycompany.mikro.graphql")
+        srcDir("src/main/graphql/mikro")
+        introspection {
+            endpointUrl.set("http://127.0.0.1/mikro/graphql")
+            schemaFile.set(file("src/main/graphql/mikro/schema.graphqls"))
+        }
+    }
+    service("rekuest") {
+        packageName.set("com.mycompany.rekuest.graphql")
+        srcDir("src/main/graphql/rekuest")
+        introspection {
+            endpointUrl.set("http://127.0.0.1/rekuest/graphql")
+            schemaFile.set(file("src/main/graphql/rekuest/schema.graphqls"))
+        }
+    }
 }

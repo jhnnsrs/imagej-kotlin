@@ -37,11 +37,8 @@
 
 package com.mycompany.imagej
 
-import java.awt.BorderLayout
-import java.awt.FlowLayout
-import javax.swing.JDialog
-import javax.swing.JPanel
-import javax.swing.border.EmptyBorder
+import ij.*
+import net.imagej.DatasetService
 import net.imagej.ImageJ
 import net.imagej.ops.OpService
 import net.imglib2.type.numeric.RealType
@@ -50,6 +47,12 @@ import org.scijava.command.Command
 import org.scijava.plugin.Parameter
 import org.scijava.plugin.Plugin
 import org.scijava.ui.UIService
+import java.awt.BorderLayout
+import java.awt.FlowLayout
+import javax.swing.JDialog
+import javax.swing.JPanel
+import javax.swing.border.EmptyBorder
+
 
 fun main() {
     // create the ImageJ application context with all available services
@@ -77,14 +80,12 @@ class Dialog : JDialog {
         getContentPane().add(contentPanel, BorderLayout.CENTER)
 
         val button = javax.swing.JButton("Press me")
-        button.addActionListener {
-            arkitekt.login { data ->
-                contentPanel.add(javax.swing.JLabel("Hello, ${data.me.username}"))
-                contentPanel.revalidate()
-                contentPanel.repaint()
-            }
-        }
         contentPanel.add(button)
+        arkitekt.login { data ->
+            contentPanel.add(javax.swing.JLabel("Hello, ${data.me.username}"))
+            contentPanel.revalidate()
+            contentPanel.repaint()
+        }
     }
 }
 
@@ -101,7 +102,11 @@ open class GaussFiltering<T : RealType<T>> : Command {
     //
     // Feel free to add more parameters here...
     //
-    @Parameter private var ctx: Context? = null
+    @Parameter
+    private var datasetService: DatasetService? = null
+
+    @Parameter
+    private var ctx: Context? = null
 
     @Parameter private var uiService: UIService? = null
 
@@ -109,7 +114,10 @@ open class GaussFiltering<T : RealType<T>> : Command {
 
     override fun run() {
         ctx?.let { context ->
-            var dialog = Dialog(context, Arkitekt())
+            if (uiService == null || datasetService == null ){
+                return@let
+            }
+            var dialog = Dialog(context, Arkitekt(uiService!!, datasetService!!))
             dialog.isVisible = true
         }
     }
