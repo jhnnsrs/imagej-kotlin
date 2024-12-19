@@ -22,7 +22,6 @@ repositories {
 dependencies {
     kapt("net.imagej:imagej:2.16.0")
     implementation("net.imagej:imagej:2.16.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("com.apollographql.apollo:apollo-runtime:4.0.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing")
@@ -37,7 +36,7 @@ dependencies {
     implementation("io.ktor:ktor-client-cio:3.0.2")
     implementation("io.ktor:ktor-client-websockets:3.0.2")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:null")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
 
 }
 
@@ -87,52 +86,6 @@ apollo {
     }
 }
 
-// Fat JAR task
-tasks.register<Jar>("fatJar") {
-    group = "build"
-    description = "Assembles a fat JAR file with dependencies included."
-
-    manifest {
-        attributes["Main-Class"] = "com.mycompany.arkitekt.ArkitektCommand" // Replace with your main class
-    }
-
-    from(sourceSets.main.get().output)
-
-    // Include dependencies in the JAR
-    dependsOn(configurations.runtimeClasspath)
-    // Include dependencies in the JAR, excluding ImageJ
-    dependsOn(configurations.runtimeClasspath)
-    from({
-        configurations.runtimeClasspath.get()
-            .map { if (it.isDirectory) it else zipTree(it) }
-    })
-
-    archiveClassifier.set("all")
-
-    // Set the duplicates handling strategy
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    isZip64 = true
-}
-
-
-publishing {
-    publications {
-        create<MavenPublication>("mavenJava") {
-            from(components["java"]) // Use the Java component
-
-            groupId = "com.mycompany"
-            artifactId = "arkitekt"
-            version = "0.1.0-SNAPSHOT"
-        }
-    }
-
-    repositories {
-        maven {
-            name = "local"
-            url = uri("${buildDir}/repo") // Publish to build/repo directory
-        }
-    }
-}
 
 
 tasks.register<Copy>("installToImageJ") {
@@ -143,6 +96,37 @@ tasks.register<Copy>("installToImageJ") {
 
     from(configurations.runtimeClasspath) {
         include("**/*.jar")
+        exclude("**/groovy*.jar")
+    }
+
+    
+
+    into(imagejPluginsDir)
+
+    // Also copy your own plugin JAR
+    from(tasks.named("jar")) {
+        include("**/*.jar")
+
+    }
+
+    doLast {
+        copy {
+            from(imagejPluginsDir)
+            into(file("/home/jhnnsrs/Programs/fiji-linux64/Fiji.app/plugins/arkitekt"))
+        }
+    }
+
+}
+
+tasks.register<Copy>("buildPlugin") {
+    description = "Copy plugin and dependencies to ImageJ plugins directory"
+
+    // Path to ImageJ's plugins directory
+    val imagejPluginsDir = file("${buildDir}/plugins")
+
+    from(configurations.runtimeClasspath) {
+        include("**/*.jar")
+        exclude("**/groovy*.jar")
     }
 
     into(imagejPluginsDir)

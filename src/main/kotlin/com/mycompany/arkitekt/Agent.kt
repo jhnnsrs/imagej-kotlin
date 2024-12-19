@@ -170,36 +170,39 @@ public class Agent(
                                 val func = registry.get_function(template)
 
                                 if (func != null) {
-                                    try {
-                                        val returns = func(app, msg.args ?: mapOf())
-                                        // Send a YIELD event
-                                        val eventYield =
-                                            AssignationEventMessage(
-                                                assignation = msg.assignation,
-                                                kind = "YIELD",
-                                                returns = returns
+
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        try {
+
+                                            val returns = func(app, msg.args ?: mapOf())
+                                            // Send a YIELD event
+                                            val eventYield =
+                                                AssignationEventMessage(
+                                                    assignation = msg.assignation,
+                                                    kind = "YIELD",
+                                                    returns = returns
+                                                )
+                                            messageChannel.send(
+                                                eventYield
                                             )
-                                        messageChannel.send(
-                                            eventYield
-                                        )
 
-                                        // Send a DONE event
-                                        val eventDone =
-                                            AssignationEventMessage(
+                                            // Send a DONE event
+                                            val eventDone =
+                                                AssignationEventMessage(
+                                                    assignation = msg.assignation,
+                                                    kind = "DONE"
+                                                )
+                                            messageChannel.send(eventDone)
+                                        } catch (e: Exception) {
+                                            val eventError = AssignationEventMessage(
                                                 assignation = msg.assignation,
-                                                kind = "DONE"
-                                            )
-                                        messageChannel.send(eventDone)
-                                    }
-                                    catch (e: Exception) {
-                                        val eventError = AssignationEventMessage(
-                                            assignation = msg.assignation,
-                                            kind = "CRITICAL",
-                                            message = e.message.toString(),
+                                                kind = "CRITICAL",
+                                                message = e.message.toString(),
 
-                                        )
+                                                )
 
-                                        messageChannel.send(eventError)
+                                            messageChannel.send(eventError)
+                                        }
                                     }
                                 } else {
                                     println("Function not found: $template")

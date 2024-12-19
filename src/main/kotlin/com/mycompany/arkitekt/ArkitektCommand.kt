@@ -40,6 +40,7 @@ package com.mycompany.arkitekt
 
 import net.imagej.DatasetService
 import net.imagej.ImageJ
+import net.imagej.display.ImageDisplayService
 import net.imagej.ops.OpService
 import net.imglib2.type.numeric.RealType
 import org.scijava.Context
@@ -116,6 +117,11 @@ open class ArkitektCommand<T : RealType<T>> : Command {
     @Parameter
     private var datasetService: DatasetService? = null
 
+
+    @Parameter
+    private var imageDisplayService: ImageDisplayService? = null
+
+
     @Parameter
     private var ctx: Context? = null
 
@@ -125,10 +131,15 @@ open class ArkitektCommand<T : RealType<T>> : Command {
 
     override fun run() {
         ctx?.let { context ->
-            if (uiService == null || datasetService == null ){
+            if (uiService == null || datasetService == null || imageDisplayService == null ){
                 return@let
             }
-            var dialog = Dialog(context, Arkitekt(uiService!!, datasetService!!))
+
+
+
+
+
+            var dialog = Dialog(context, Arkitekt(uiService!!, datasetService!!, imageDisplayService!!))
             dialog.isVisible = true
         }
     }

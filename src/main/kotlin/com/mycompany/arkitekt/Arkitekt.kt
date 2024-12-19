@@ -39,6 +39,7 @@ import net.imglib2.img.Img
 import net.imglib2.type.numeric.RealType
 import net.imglib2.RandomAccess
 import net.imagej.axis.Axes
+import net.imagej.display.ImageDisplayService
 
 
 @Serializable data class Requirement(val service: String, val key: String)
@@ -203,7 +204,8 @@ class App(
         public val unlok: Unlok,
         public val rekuest: Rekuest,
         public val uiService: UIService,
-        public val datasetService: DatasetService
+        public val datasetService: DatasetService,
+        public var imageDisplayService: ImageDisplayService
 )
 
 
@@ -310,7 +312,7 @@ fun <T : RealType<T>> imgPlusToCTZXYUInt32UcarArray(imgPlus: ImgPlus<T>): ucar.m
     return ucarArray
 }
 
-class Arkitekt(private val uiService: UIService, private val datasetService: DatasetService) {
+class Arkitekt(private val uiService: UIService, private val datasetService: DatasetService, private val imageDisplayService: ImageDisplayService) {
     private val client = OkHttpClient()
     private val gson = Gson()
     private val manifest =
@@ -484,12 +486,36 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
         }
     }
 
+    fun generateChunkShape(inarrayShape: IntArray): IntArray {
+        // Ensure the shape has the expected dimensions: c, t, z, y, x
+        if (inarrayShape.size != 5) {
+            throw IllegalArgumentException("Input array shape must have exactly 5 dimensions: c, t, z, y, x")
+        }
+
+        val chunkShape = IntArray(5)
+
+        // Fixed chunk sizes for c, t, and z
+        chunkShape[0] = 1 // c
+        chunkShape[1] = 1 // t
+        chunkShape[2] = 1 // z
+
+        // For x and y, use 1024 if size > 1024, otherwise use the input size
+        chunkShape[3] = if (inarrayShape[3] > 1024) 1024 else inarrayShape[3] // y
+        chunkShape[4] = if (inarrayShape[4] > 1024) 1024 else inarrayShape[4] // x
+
+        return chunkShape
+    }
+
+
 
     suspend fun uploadArray(app: App, inarray: ucar.ma2.Array, name: String): FromArrayLikeMutation.FromArrayLike {
 
         var key = UUID.randomUUID().toString()
 
         val s3Client = app.datalayer.requestStore(key)
+
+
+
 
         val array =
                 Array.create(
@@ -498,7 +524,7 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
                                 .withShape(*inarray.shape.map { i -> i.toLong() }.toLongArray())
                                 .withDimensionNames("c", "t", "z", "y", "x")
                                 .withDataType(DataType.UINT32)
-                                .withChunkShape(*inarray.shape.map { i -> i.toInt() }.toIntArray())
+                                .withChunkShape(*generateChunkShape(inarray.shape.map { i -> i.toInt() }.toIntArray()))
                                 .withFillValue(0)
                                 .withCodecs { it.withBlosc() }
                                 .build()!!
@@ -521,11 +547,20 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
 
     suspend fun runX(app: App, args: Map<String, JsonElement?>): Map<String, JsonElement?> {
 
-        var dataset = app.datasetService.datasets[0]
+        imageDisplayService.imageDisplays.forEach {
+            d -> println(d)
+        }
+
+
+
+        var active = imageDisplayService.getActiveDataset( imageDisplayService.imageDisplays[0])
+
+
+
 
         var name = args.get("name")!!.jsonPrimitive.content
 
-        var array = imgPlusToCTZXYUInt32UcarArray(dataset.imgPlus)
+        var array = imgPlusToCTZXYUInt32UcarArray(active.imgPlus)
 
         var image = uploadArray(app, array, name)
 
@@ -571,7 +606,7 @@ class Arkitekt(private val uiService: UIService, private val datasetService: Dat
             var mikro = Mikro(fakts.mikro, token)
             var datalayer = Datalayer(fakts.datalayer, mikro)
 
-            var app = App(mikro, datalayer, unlok, rekuest, uiService, datasetService)
+            var app = App(mikro, datalayer, unlok, rekuest, uiService, datasetService, imageDisplayService)
             var agent = Agent(rekuest, fakts.rekuest, token, registry, app, "default")
 
             agent.createAgent("my_agent", listOf("default"))
