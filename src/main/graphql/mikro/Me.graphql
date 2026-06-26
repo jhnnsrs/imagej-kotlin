@@ -5,8 +5,8 @@ mutation FromArrayLike($input: FromArrayLikeInput!) {
   }
 }
 
-mutation RequestUpload($input: RequestUploadInput!) {
-  requestUpload(input: $input) {
+mutation RequestZarrUpload($input: RequestZarrUploadInput!) {
+  requestZarrUpload(input: $input) {
     accessKey
     status
     secretKey
@@ -17,8 +17,17 @@ mutation RequestUpload($input: RequestUploadInput!) {
   }
 }
 
-mutation RequestAccess($input: RequestAccessInput!) {
-  requestAccess(input: $input) {
+mutation FinishZarrUpload($input: FinishZarrUploadInput!) {
+  finishZarrUpload(input: $input) {
+    id
+    key
+    bucket
+    path
+  }
+}
+
+mutation RequestZarrAccess($input: RequestZarrAccessInput!) {
+  requestZarrAccess(input: $input) {
     accessKey
     secretKey
     bucket

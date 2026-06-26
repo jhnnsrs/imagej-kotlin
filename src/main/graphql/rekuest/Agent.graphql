@@ -1,34 +1,13 @@
 mutation EnsureAgent($input: AgentInput!) {
   ensureAgent(input: $input) {
     id
-    instanceId
-    extensions
-    name
+    hash
   }
 }
 
-mutation CreateTemplate($input: CreateTemplateInput!) {
-  createTemplate(input: $input) {
+mutation ImplementAgent($input: ImplementAgentInput!) {
+  implementAgent(input: $input) {
     id
-  }
-}
-
-query GetProvision($id: ID!) {
-  provision(id: $id) {
-    id
-    template {
-        id
-        interface
-        extension
-    }
-  }
-}
-
-mutation SetExtensionTemplates($input: SetExtensionTemplatesInput!) {
-  setExtensionTemplates(input: $input) {
-    id
-    node {
-        id
-    }
+    hash
   }
 }

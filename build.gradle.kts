@@ -5,6 +5,12 @@ plugins {
     kotlin("plugin.serialization") version "2.1.0"
     id("com.apollographql.apollo") version "4.0.0"
     id("maven-publish") // Add this line
+    application
+}
+
+application {
+    // Entry point: top-level main() in ArkitektCommand.kt -> compiled to ...ArkitektCommandKt
+    mainClass.set("com.mycompany.arkitekt.ArkitektCommandKt")
 }
 
 group = "com.mycompany"
@@ -12,7 +18,10 @@ version = "0.1.0-SNAPSHOT"
 
 description = "Arkitekt Command"
 
+
+
 repositories {
+    mavenLocal()
     mavenCentral()
     maven("https://maven.imagej.net/content/groups/public")
     maven("https://repo.maven.apache.org/maven2")
@@ -22,16 +31,13 @@ repositories {
 dependencies {
     kapt("net.imagej:imagej:2.16.0")
     implementation("net.imagej:imagej:2.16.0")
+    implementation("dev.zarr:zarr-java:0.0.5-SNAPSHOT")
     implementation("com.apollographql.apollo:apollo-runtime:4.0.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing")
-    implementation("dev.zarr:zarr-java:0.0.4")
-    implementation("com.amazonaws:aws-java-sdk-s3:1.12.780")
+    implementation(platform("software.amazon.awssdk:bom:2.32.8"))
+    implementation("software.amazon.awssdk:s3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0-RC")
-
-
-
-
     implementation("io.ktor:ktor-client-core:3.0.2")
     implementation("io.ktor:ktor-client-cio:3.0.2")
     implementation("io.ktor:ktor-client-websockets:3.0.2")
@@ -41,7 +47,9 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(8)
+    // Run/compile on a full JDK 17 (has AWT, so the ImageJ GUI shows; Gradle-8.10 compatible).
+    // Bytecode target stays 1.8 (see jvmTarget / sourceCompatibility below) for Fiji distribution.
+    jvmToolchain(17)
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
@@ -59,31 +67,64 @@ tasks.withType<JavaCompile> {
 
 
 apollo {
+    // The backend serves each service's schema as plain-text SDL at
+    // `<host>/<service>/schema` (NOT a GraphQL introspection endpoint), so the
+    // committed schema.graphqls files in each srcDir are auto-detected for offline
+    // codegen. To refresh them, run `./gradlew downloadSchemas` (see below) —
+    // Apollo's `introspection {}` block can't be used because it POSTs an
+    // introspection query and expects JSON, while these endpoints return SDL.
     service("lok") {
         packageName.set("com.mycompany.lok.graphql")
         srcDir("src/main/graphql/lok")
-        introspection {
-          endpointUrl.set("http://127.0.0.1/lok/graphql")
-          schemaFile.set(file("src/main/graphql/lok/schema.graphqls"))
-
-        }
     }
     service("mikro") {
         packageName.set("com.mycompany.mikro.graphql")
         srcDir("src/main/graphql/mikro")
-        introspection {
-            endpointUrl.set("http://127.0.0.1/mikro/graphql")
-            schemaFile.set(file("src/main/graphql/mikro/schema.graphqls"))
-        }
     }
     service("rekuest") {
         packageName.set("com.mycompany.rekuest.graphql")
         srcDir("src/main/graphql/rekuest")
-        introspection {
-            endpointUrl.set("http://127.0.0.1/rekuest/graphql")
-            schemaFile.set(file("src/main/graphql/rekuest/schema.graphqls"))
+    }
+}
+
+// --- SDL schema refresh ---------------------------------------------------
+// Host of the Arkitekt backend that serves the SDL. Resolved from (in order):
+//   1. -PschemaHost=... gradle property
+//   2. ARKITEKT_SCHEMA_HOST env var (e.g. set in a local .env you `source`)
+//   3. default: http://jhnnsrs-lab
+val schemaHost: String = (findProperty("schemaHost") as String?)
+    ?: System.getenv("ARKITEKT_SCHEMA_HOST")
+    ?: "http://jhnnsrs-lab"
+
+val schemaServices = mapOf(
+    "Lok" to "src/main/graphql/lok/schema.graphqls",
+    "Mikro" to "src/main/graphql/mikro/schema.graphqls",
+    "Rekuest" to "src/main/graphql/rekuest/schema.graphqls",
+)
+
+val downloadSchemaTasks = schemaServices.map { (name, path) ->
+    tasks.register("download${name}Schema") {
+        group = "apollo"
+        description = "Download $name SDL from $schemaHost into $path"
+        doLast {
+            val service = name.lowercase()
+            val url = "$schemaHost/$service/schema"
+            val target = file(path)
+            logger.lifecycle("Downloading $service schema from $url")
+            val sdl = uri(url).toURL().readText()
+            require(sdl.isNotBlank() && !sdl.trimStart().startsWith("{")) {
+                "Expected SDL from $url but got something else (empty or JSON):\n${sdl.take(200)}"
+            }
+            target.writeText(sdl)
+            logger.lifecycle("Wrote ${sdl.length} chars to $path")
         }
     }
+}
+
+tasks.register("downloadSchemas") {
+    group = "apollo"
+    description = "Download all service SDL schemas from $schemaHost"
+    dependsOn(downloadSchemaTasks)
 }
 
 

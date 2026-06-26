@@ -1,0 +1,9 @@
+# Apollo Federation v2 directive definitions.
+#
+# The backend serves a *federated* SDL (`schema @link(... federation ...)` with
+# `@key` on entity types). Apollo Kotlin's codegen does not auto-import these from
+# the `@link`, so we define them here. This file is committed and is NOT touched by
+# `./gradlew downloadMikroSchema` (which only rewrites schema.graphqls), so the
+# definitions survive schema refreshes.
+directive @link(url: String!, import: [String!]) repeatable on SCHEMA
+directive @key(fields: String!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE

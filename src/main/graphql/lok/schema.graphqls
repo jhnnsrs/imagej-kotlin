@@ -1,17 +1,307 @@
-"""
-Make string uppercase
-"""
-directive @upper on FIELD
+input AcceptInviteInput {
+  token: String!
+}
+
+input AcknowledgeMessageInput {
+  id: ID!
+  acknowledged: Boolean!
+}
+
+input AddItemToStashInput {
+  stash: ID!
+  items: [StashItemInput!]!
+}
+
+input AddUserToOrganizationInput {
+  user: ID!
+  organization: ID!
+  roles: [String!]!
+}
 
 """
-Replace a substring with another substring
+An App is the Arkitekt equivalent of a Software Application. It is a collection of `Releases` that can be all part of the same application. E.g the App `Napari` could have the releases `0.1.0` and `0.2.0`.
 """
-directive @replace(old: String!, new: String!) on FIELD
+type App {
+  id: ID!
+
+  """The name of the app"""
+  name: String!
+
+  """
+  The identifier of the app. This should be a globally unique string that identifies the app. We encourage you to use the reverse domain name notation. E.g. `com.example.myapp`
+  """
+  identifier: AppIdentifier!
+
+  """
+  The releases of the app. A release is a version of the app that can be installed by a user.
+  """
+  releases: [Release!]!
+
+  """
+  The logo of the app. This should be a url to a logo that can be used to represent the app.
+  """
+  logo: MediaStore
+}
+
+"""App(id, name, identifier, logo)"""
+input AppFilter {
+  search: String
+  ids: [ID!]
+  AND: AppFilter
+  OR: AppFilter
+  NOT: AppFilter
+  DISTINCT: Boolean
+}
 
 """
-Make get stuff uppercase
+The App identifier is a unique identifier for an app. It is used to identify the app in the database and in the code. We encourage you to use the reverse domain name notation. E.g. `com.example.myapp`
 """
-directive @relation(on: String!) on FIELD
+scalar AppIdentifier
+
+input CancelInviteInput {
+  id: ID!
+}
+
+"""
+A client is a way of authenticating users with a release.
+ The strategy of authentication is defined by the kind of client. And allows for different authentication flow. 
+ E.g a client can be a DESKTOP app, that might be used by multiple users, or a WEBSITE that wants to connect to a user's account, 
+ but also a DEVELOPMENT client that is used by a developer to test the app. The client model thinly wraps the oauth2 client model, which is used to authenticate users.
+"""
+type Client {
+  id: ID!
+
+  """
+  Is this client functional? A functional client is a client that is able to authenticate users. If a client is not functional, it will not be able to authenticate users.
+  """
+  functional: Boolean!
+
+  """The release that this client belongs to."""
+  release: Release!
+
+  """The user that manages this release."""
+  tenant: User!
+
+  """
+  The real oauth2 client that is used to authenticate users with this client.
+  """
+  oauth2Client: Oauth2Client!
+
+  """Is this client public? If a client is public """
+  public: Boolean!
+
+  """
+  If the client is a DEVELOPMENT client, which requires no further authentication, this is the user that is authenticated with the client.
+  """
+  user: User
+
+  """
+  The logo of the release. This should be a url to a logo that can be used to represent the release.
+  """
+  logo: MediaStore
+
+  """The name of the client. This is a human readable name of the client."""
+  name: String!
+
+  """The node this runs on"""
+  node: Device
+
+  """
+  The mappings of the client. A mapping is a mapping of a service to a service instance. This is used to configure the composition.
+  """
+  mappings: [ServiceInstanceMapping!]!
+
+  """
+  The configuration of the client. This is the configuration that will be sent to the client. It should never contain sensitive information.
+  """
+  kind: ClientKind!
+
+  """
+  The operational role of the client. INTERFACE clients are human interfaces operated by a user in real time. AGENT clients are authorized once and then run unattended, receiving and processing tasks on the user's behalf.
+  """
+  role: ClientRole!
+
+  """
+  The configuration of the client. This is the configuration that will be sent to the client. It should never contain sensitive information.
+  """
+  token: String!
+
+  """
+  The issue url of the client. This is the url where users can report issues and get more information about the client.
+  """
+  issueUrl: String
+
+  """
+  The public sources of the client. These are the public sources where users can find more information about the client.
+  """
+  publicSources: [PublicSource!]!
+}
+
+"""
+Client(id, composition, functional, name, release, oauth2_client, kind, role, user, organization, membership, redirect_uris, public, token, node, public_sources, tenant, created_at, requirements_hash, statuses, logo, last_reported_at, manifest)
+"""
+input ClientFilter {
+  search: String
+  ids: [ID!]
+
+  """Operational role: human INTERFACE vs autonomous task-receiving AGENT."""
+  role: ClientRole
+  AND: ClientFilter
+  OR: ClientFilter
+  NOT: ClientFilter
+  DISTINCT: Boolean
+}
+
+enum ClientKind {
+  DEVELOPMENT
+  WEBSITE
+  DESKTOP
+}
+
+enum ClientRole {
+  INTERFACE
+  AGENT
+}
+
+"""
+An Organization is a group of users that can work together on a project.
+"""
+type ComChannel {
+  id: ID!
+  user: User!
+}
+
+"""
+Comments represent the comments of a user on a specific data item
+tart are identified by the unique combination of `identifier` and `object`.
+E.g a comment for an Image on the Mikro services would be serverd as
+`@mikro/image:imageID`.
+
+Comments always belong to the user that created it. Comments in threads
+get a parent attribute set, that points to the immediate parent.
+
+Each comment contains multiple descendents, that make up a *rich* representation
+of the underlying comment data including potential mentions, or links, or
+paragraphs.
+"""
+type Comment {
+  id: ID!
+
+  """The object id of the object, on its associated service"""
+  object: String!
+
+  """The identifier of the object. Consult the documentation for the format"""
+  identifier: Identifier!
+
+  """The children of this comment"""
+  children: [Comment!]!
+
+  """The parent of this comment. Think Thread"""
+  parent: Comment
+
+  """The time this comment got created"""
+  createdAt: DateTime!
+
+  """The users that got mentioned in this comment"""
+  mentions(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
+
+  """The user that resolved this comment"""
+  resolvedBy: User
+
+  """The user that created this comment"""
+  user: User!
+
+  """
+  The immediate descendends of the comments. Think typed Rich Representation
+  """
+  descendants: [Descendant!]!
+  resolved: Boolean!
+}
+
+"""A Communication"""
+type Communication {
+  channel: ID!
+}
+
+type Context {
+  """The user that is associated with this app"""
+  user: User!
+
+  """The organization that is associated with this app"""
+  organization: Organization!
+
+  """The roles that the user has in the organization"""
+  roles: [String!]!
+
+  """The scope of the app within in the organization"""
+  scope: [String!]!
+
+  """Are we acting in the active organization of the user?"""
+  fitsActiveOrganization: Boolean!
+}
+
+input CreateCommentInput {
+  descendants: [DescendantInput!]!
+  identifier: Identifier!
+  object: ID!
+  parent: ID = null
+  notify: Boolean = false
+}
+
+input CreateGroupProfileInput {
+  group: ID!
+  name: String!
+  avatar: ID!
+}
+
+input CreateInviteInput {
+  organization: ID
+  expiresInDays: Int = 7
+  roles: [String!] = null
+}
+
+input CreateOrganizationInput {
+  name: String!
+  description: String = null
+}
+
+input CreateProfileInput {
+  user: ID!
+  name: String!
+}
+
+input CreateServiceInstanceInput {
+  identifier: String!
+  service: ID!
+  allowedUsers: [ID!] = null
+  allowedGroups: [ID!] = null
+  deniedGroups: [ID!] = null
+  deniedUsers: [ID!] = null
+}
+
+input CreateStashInput {
+  name: String = null
+  description: String = null
+}
+
+input CreateUserInput {
+  name: String!
+}
+
+"""Date with time (isoformat)"""
+scalar DateTime
+
+input DeclineInviteInput {
+  token: String!
+}
+
+input DeleteStashInput {
+  stash: ID!
+}
+
+input DeleteStashItems {
+  items: [ID!]!
+}
 
 """
 A descendant of a comment. Descendend are used to render rich text in the frontend.
@@ -25,200 +315,239 @@ interface Descendant {
   children: [Descendant!]
 }
 
-"""
-The `Identifier` scalasr typsse represents a reference to a store previously created by the user n a datalayer
-"""
-scalar UnsafeChild
+input DescendantInput {
+  kind: DescendantKind!
+  children: [DescendantInput!] = null
+  user: String = null
+  bold: Boolean = null
+  italic: Boolean = null
+  code: Boolean = null
+  text: String = null
+}
 
-"""
-The Kind of a Descendant
-"""
+"""The Kind of a Descendant"""
 enum DescendantKind {
   LEAF
   MENTION
   PARAGRAPH
 }
 
-"""
-A mention of a user
-"""
-type MentionDescendant implements Descendant {
-  """
-  Unsafe children are not typed and fall back to json. This is a workaround if queries get too complex.
-  """
-  unsafeChildren: [UnsafeChild!]
-  kind: DescendantKind!
-  children: [Descendant!]
-  user: User
+input DevelopmentClientInput {
+  manifest: ManifestInput!
+  composition: ID = null
+  layers: [String!] = ["web"]
+  role: ClientRole = null
 }
 
-"\nA User is a person that can log in to the system. They are uniquely identified by their username.\nAnd can have an email address associated with them (but don't have to).\n\nA user can be assigned to groups and has a profile that can be used to display information about them.\nDetail information about a user can be found in the profile.\n\nAll users can have social accounts associated with them. These are used to authenticate the user with external services,\nsuch as ORCID or GitHub.\n\n"
-type User {
+"""Device(id, node_id, name, organization)"""
+type Device {
+  id: ID!
+  name: String
+  nodeId: ID!
+  clients(filters: ClientFilter, pagination: OffsetPaginationInput): [Client!]!
+
+  """The device groups that belong to this device."""
+  deviceGroups(filters: DeviceGroupFilter, pagination: OffsetPaginationInput): [DeviceGroup!]!
+}
+
+"""Device(id, node_id, name, organization)"""
+input DeviceFilter {
+  search: String
+  ids: [ID!]
+  AND: DeviceFilter
+  OR: DeviceFilter
+  NOT: DeviceFilter
+  DISTINCT: Boolean
+}
+
+"""
+A DeviceGroup is a group of compute nodes that can be used to run clients. DeviceGroups can be used to group compute nodes by location, hardware type, or any other criteria.
+"""
+type DeviceGroup {
   id: ID!
 
-  """
-  Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.
-  """
-  username: String!
-  firstName: String
-  lastName: String
-  email: String
-
-  """
-  The groups this user belongs to. A user will get all permissions granted to each of their groups.
-  """
-  groups(filters: GroupFilter, pagination: OffsetPaginationInput): [Group!]!
-  avatar: String
-  profile: Profile!
-  managedClients: [DjangoModelType!]!
-  socialAccounts: [SocialAccount!]!
-}
-
-"\nA Group is the base unit of Role Based Access Control. A Group can have many users and many permissions. A user can have many groups. A user with a group that has a permission can perform the action that the permission allows.\nGroups are propagated to the respecting subservices. Permissions are not. Each subservice has to define its own permissions and mappings to groups.\n"
-type Group {
-  id: ID!
+  """The name of the device group."""
   name: String!
-  users(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
+
+  """The description of the device group."""
+  description: String
+
+  """The devices that belong to this device group."""
+  devices(filters: DeviceFilter, pagination: OffsetPaginationInput): [Device!]!
 }
 
-"""
-A User of the System
-
-Lok Users are the main users of the system. They can be assigned to groups and have profiles, that can be used to display information about them.
-Each user is identifier by a unique username, and can have an email address associated with them.
-"""
-input UserFilter {
+"""DeviceGroup(id, name, organization)"""
+input DeviceGroupFilter {
   search: String
-
-  """
-  Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.
-  """
-  username: StrFilterLookup
   ids: [ID!]
-  socialAccounts: SocialAccountFilter
-  AND: UserFilter
-  OR: UserFilter
-}
-
-input StrFilterLookup {
-  exact: String
-  iExact: String
-  contains: String
-  iContains: String
-  inList: [String!]
-  gt: String
-  gte: String
-  lt: String
-  lte: String
-  startsWith: String
-  iStartsWith: String
-  endsWith: String
-  iEndsWith: String
-  range: [String!]
-  isNull: Boolean
-  regex: String
-  iRegex: String
-  nExact: String
-  nIExact: String
-  nContains: String
-  nIContains: String
-  nInList: [String!]
-  nGt: String
-  nGte: String
-  nLt: String
-  nLte: String
-  nStartsWith: String
-  nIStartsWith: String
-  nEndsWith: String
-  nIEndsWith: String
-  nRange: [String!]
-  nIsNull: Boolean
-  nRegex: String
-  nIRegex: String
-}
-
-"""
-SocialAccount(id, user, provider, uid, last_login, date_joined, extra_data)
-"""
-input SocialAccountFilter {
-  search: String
-  provider: ProviderType
-  ids: [ID!]
-  AND: SocialAccountFilter
-  OR: SocialAccountFilter
-}
-
-enum ProviderType {
-  ORCID
-}
-
-input OffsetPaginationInput {
-  offset: Int! = 0
-  limit: Int! = -1
-}
-
-"""
-__doc__
-"""
-input GroupFilter {
-  search: String
-  name: StrFilterLookup
-  ids: [ID!]
-  AND: GroupFilter
-  OR: GroupFilter
-}
-
-"\nA Profile of a User. A Profile can be used to display personalied information about a user.\n\n\n\n\n"
-type Profile {
-  """
-  A short bio of the user
-  """
-  bio: String!
-
-  """
-  The name of the user
-  """
-  name: String!
+  AND: DeviceGroupFilter
+  OR: DeviceGroupFilter
+  NOT: DeviceGroupFilter
+  DISTINCT: Boolean
 }
 
 type DjangoModelType {
   pk: ID!
 }
 
-"\nA Social Account is an account that is associated with a user. It can be used to authenticate the user with external services. It\ncan be used to store extra data about the user that is specific to the provider. We provide typed access to the extra data for\nsome providers. For others we provide a generic json field that can be used to store arbitrary data. Generic accounts are\nalways available, but typed accounts are only available for some providers.\n"
-interface SocialAccount {
-  """
-  The provider of the account. This can be used to determine the type of the account.
-  """
-  provider: ProviderType!
+"""The `Fakt` scalar type represents a reference to a fakt"""
+scalar Fakt
 
-  """
-  The unique identifier of the account. This is unique for the provider.
-  """
-  uid: String!
+enum Granularity {
+  HOUR
+  DAY
+  WEEK
+  MONTH
+  QUARTER
+  YEAR
+}
 
-  """
-  Extra data that is specific to the provider. This is a json field and can be used to store arbitrary data.
-  """
-  extraData: ExtraData!
+"\nA Group is the base unit of Role Based Access Control. A Group can have many users and many permissions. A user can have many groups. A user with a group that has a permission can perform the action that the permission allows.\nGroups are propagated to the respecting subservices. Permissions are not. Each subservice has to define its own permissions and mappings to groups.\n"
+type Group {
+  id: ID!
+  name: String!
+  profile: GroupProfile
+
+  """The users that are in the group"""
+  users: [User!]!
+}
+
+"""__doc__"""
+input GroupFilter {
+  search: String
+  name: StrFilterLookup
+  ids: [ID!]
+  AND: GroupFilter
+  OR: GroupFilter
+  NOT: GroupFilter
+  DISTINCT: Boolean
+}
+
+"\nA Profile of a User. A Profile can be used to display personalied information about a user.\n\n\n\n\n"
+type GroupProfile {
+  id: ID!
+
+  """A short bio of the group"""
+  bio: String
+
+  """The name of the group"""
+  name: String
+
+  """The avatar of the group"""
+  avatar: MediaStore
 }
 
 """
-The `ArrayLike` scalasr typsse represents a reference to a store previously created by the user n a datalayer
+The `Identifier` scalasr typsse represents a reference to a store previously created by the user n a datalayer
 """
-scalar ExtraData
+scalar Identifier
 
 """
-A Paragraph of text
+An alias for a service instance. This is used to provide a more user-friendly name for the instance.
 """
-type ParagraphDescendant implements Descendant {
+type InstanceAlias {
+  id: ID!
+
+  """The layer that this alias belongs to."""
+  layer: Layer!
+
+  """The instance that this alias belongs to."""
+  instance: ServiceInstance!
+
+  """The name of the alias. This is a human readable name of the alias."""
+  kind: String!
+
   """
-  Unsafe children are not typed and fall back to json. This is a workaround if queries get too complex.
+  The host of the alias, if its a ABSOLUTE alias (e.g. 'example.com'). If not set, the alias is relative to the layer's domain.
   """
-  unsafeChildren: [UnsafeChild!]
-  kind: DescendantKind!
-  children: [Descendant!]
-  size: String
+  host: String
+
+  """
+  The port of the alias, if its a ABSOLUTE alias (e.g. 'example.com:8080'). If not set, the alias is relative to the layer's port.
+  """
+  port: Int
+
+  """
+  The path of the alias, if its a ABSOLUTE alias (e.g. 'example.com/path'). If not set, the alias is relative to the layer's path.
+  """
+  path: String
+
+  """
+  Is this alias using SSL? If true, the alias will be accessed via https:// instead of http://. This is used to indicate that the alias is secure and should be accessed via SSL
+  """
+  ssl: Boolean!
+
+  """
+  The challenge of the alias. This is used to verify that the alias is reachable. If set, the alias will be accessed via the challenge URL (e.g. 'example.com/.well-known/challenge'). If not set, the alias will be accessed via the instance's URL.
+  """
+  challenge: String!
+}
+
+"""
+A single-use magic invite link that allows one person to join an organization.
+"""
+type Invite {
+  id: ID!
+  token: String!
+  email: String
+  createdBy: User!
+  createdFor: Organization!
+  createdAt: DateTime!
+  expiresAt: DateTime
+  status: String!
+  acceptedBy: User
+  declinedBy: User
+  respondedAt: DateTime
+  roles(filters: RoleFilter, pagination: OffsetPaginationInput): [Role!]!
+  createdMembershipts(filters: MembershipFilter, pagination: OffsetPaginationInput): [Membership!]!
+
+  """Check if the invite is still valid and pending"""
+  valid: Boolean!
+
+  """Get the full URL for accepting this invite"""
+  inviteUrl: String!
+}
+
+"""
+A Service is a Webservice that a Client might want to access. It is not the configured instance of the service, but the service itself.
+"""
+type Layer {
+  id: ID!
+
+  """The name of the layer"""
+  name: String!
+
+  """
+  The identifier of the service. This should be a globally unique string that identifies the service. We encourage you to use the reverse domain name notation. E.g. `com.example.myservice`
+  """
+  identifier: ServiceIdentifier!
+
+  """
+  The logo of the service. This should be a url to a logo that can be used to represent the service.
+  """
+  logo: MediaStore
+
+  """
+  The description of the service. This should be a human readable description of the service.
+  """
+  description: String
+
+  """
+  The instances of the service. A service instance is a configured instance of a service. It will be configured by a configuration backend and will be used to send to the client as a configuration. It should never contain sensitive information.
+  """
+  instances(filters: ServiceInstanceFilter, pagination: OffsetPaginationInput): [ServiceInstance!]!
+}
+
+"""
+Layer(id, name, identifier, organization, logo, description, dns_probe, get_probe, kind)
+"""
+input LayerFilter {
+  search: String
+  ids: [ID!]
+  AND: LayerFilter
+  OR: LayerFilter
+  NOT: LayerFilter
+  DISTINCT: Boolean
 }
 
 """
@@ -235,114 +564,285 @@ type LeafDescendant implements Descendant {
   italic: Boolean
   underline: Boolean
   text: String
-  code: String
+  code: Boolean
 }
 
-"\nThe Generic Account is a Social Account that maps to a generic account. It provides information about the\nuser that is specific to the provider. This includes untyped extra data.\n\n"
-type GenericAccount implements SocialAccount {
-  """
-  The provider of the account. This can be used to determine the type of the account.
-  """
-  provider: ProviderType!
-
-  """
-  The unique identifier of the account. This is unique for the provider.
-  """
-  uid: String!
-  extraData: ExtraData!
-}
-
-"\nAn ORCID Account is a Social Account that maps to an ORCID Account. It provides information about the\nuser that is specific to the ORCID service. This includes the ORCID Identifier, the ORCID Preferences and\nthe ORCID Person. The ORCID Person contains information about the user that is specific to the ORCID service.\nThis includes the ORCID Activities, the ORCID Researcher URLs and the ORCID Addresses.\n\n"
-type OrcidAccount implements SocialAccount {
-  """
-  The provider of the account. This can be used to determine the type of the account.
-  """
-  provider: ProviderType!
-
-  """
-  The unique identifier of the account. This is unique for the provider.
-  """
-  uid: String!
-
-  """
-  Extra data that is specific to the provider. This is a json field and can be used to store arbitrary data.
-  """
-  extraData: ExtraData!
-
-  """
-  The ORCID Identifier of the user. The UID of the account is the same as the path of the identifier.
-  """
-  identifier: OrcidIdentifier!
-
-  """
-  Information about the person that is specific to the ORCID service.
-  """
-  person: OrcidPerson
-}
-
-"""
-The ORCID Identifier of a user. This is a unique identifier that is used to identify a user on the ORCID service. It is composed of a uri, a path and a host.
-"""
-type OrcidIdentifier {
-  """
-  The uri of the identifier
-  """
-  uri: String!
-
-  """
-  The path of the identifier
-  """
-  path: String!
-
-  """
-  The host of the identifier
-  """
+input LinkingRequestInput {
   host: String!
+  port: String!
+  isSecure: Boolean! = false
 }
 
-type OrcidPerson {
-  researcherUrls: [String!]!
-  addresses: [String!]!
+input ManifestInput {
+  identifier: String!
+  version: String!
+  logo: String = null
+  scopes: [String!]! = []
+  requirements: [RequirementInput!]! = []
+  nodeId: String = null
+  publicSources: [PublicSourceInput!] = null
+}
+
+"""
+Small helper around S3-backed stored objects.
+
+Provides convenience helpers for generating presigned URLs and
+uploading content.
+"""
+type MediaStore {
+  id: ID!
+
+  """The stodre of the image"""
+  path: String!
+  bucket: String!
+  key: String!
+  presignedUrl(host: String = null): String!
+}
+
+"\nA Membership is a relation between a User and an Organization. It can have multiple Roles assigned to it.\n"
+type Membership {
+  id: ID!
+  user: User!
+  organization: Organization!
+
+  """The roles that the user has in the organization"""
+  roles(filters: RoleFilter, pagination: OffsetPaginationInput): [Role!]!
+
+  """The groups that the user has in the organization"""
+  groups: [Group!]!
+}
+
+"""__doc__"""
+input MembershipFilter {
+  search: String
+  name: StrFilterLookup
+  ids: [ID!]
+  AND: MembershipFilter
+  OR: MembershipFilter
+  NOT: MembershipFilter
+  DISTINCT: Boolean
+}
+
+"""A mention of a user"""
+type MentionDescendant implements Descendant {
+  """
+  Unsafe children are not typed and fall back to json. This is a workaround if queries get too complex.
+  """
+  unsafeChildren: [UnsafeChild!]
+  kind: DescendantKind!
+  children: [Descendant!]
+  user: User
+}
+
+type Mutation {
+  createUser(input: CreateUserInput!): User!
+  addUserToOrganization(input: AddUserToOrganizationInput!): Membership!
+  createOrganization(input: CreateOrganizationInput!): Organization!
+  createComment(input: CreateCommentInput!): Comment!
+  registerComChannel(input: RegisterComChannelInput!): ComChannel!
+  notifyUser(input: NotifyUserInput!): Boolean!
+  createRedeemToken(input: RedeemTokenInput!): RedeemToken!
+  replyTo(input: ReplyToCommentInput!): Comment!
+  resolveComment(input: ResolveCommentInput!): Comment!
+  createDevelopmentalClient(input: DevelopmentClientInput!): Client!
+  render(input: RenderInput!): Fakt!
+  acknowledgeMessage(input: AcknowledgeMessageInput!): SystemMessage!
+
+  """Create a new stash"""
+  createStash(input: CreateStashInput!): Stash!
+
+  """Update a stash"""
+  updateStash(input: UpdateStashInput!): Stash!
+
+  """Add items to a stash"""
+  addItemsToStash(input: AddItemToStashInput!): [StashItem!]!
+
+  """Delete items from a stash"""
+  deleteStashItems(input: DeleteStashItems!): [ID!]!
+  deleteStash(input: DeleteStashInput!): ID!
+  createServiceInstance(input: CreateServiceInstanceInput!): ServiceInstance!
+  updateServiceInstance(input: UpdateServiceInstanceInput!): ServiceInstance!
+  createInstanceAlias(input: CreateServiceInstanceInput!): InstanceAlias!
+  updateInstanceAlias(input: UpdateServiceInstanceInput!): InstanceAlias!
+  requestMediaUpload(input: RequestMediaUploadInput!): PresignedPostCredentials!
+  updateProfile(input: UpdateProfileInput!): Profile!
+  createProfile(input: CreateProfileInput!): Profile!
+  updateGroupProfile(input: UpdateGroupProfileInput!): GroupProfile!
+  createGroupProfile(input: CreateGroupProfileInput!): GroupProfile!
+  createInvite(input: CreateInviteInput!): Invite!
+  acceptInvite(input: AcceptInviteInput!): Membership!
+  declineInvite(input: DeclineInviteInput!): Invite!
+  cancelInvite(input: CancelInviteInput!): Invite!
+  updateOrganization(input: UpdateOrganizationInput!): Organization!
+  updateDevice(input: UpdateDeviceInput!): Device!
+}
+
+input NotifyUserInput {
+  user: ID!
+  message: String!
+  title: String = ""
+}
+
+"""
+OAuth2Client(id, membership, client_id, client_secret, redirect_uris, scope, token_endpoint_auth_method, grant_types, response_types, id_token_signed_response_alg)
+"""
+type Oauth2Client {
+  id: String!
+  clientId: String!
+}
+
+input OffsetPaginationInput {
+  offset: Int! = 0
+  limit: Int
+}
+
+"""
+An Organization is a group of users that can work together on a project.
+"""
+type Organization {
+  id: ID!
+  slug: String!
+
+  """A short description of the organization"""
+  description: String
+
+  """The logo of the organization"""
+  avatar: MediaStore
+
+  """The users that are part of the organization"""
+  users(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
+
+  """The users that are currently active in the organization"""
+  activeUsers(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
+  profile: OrganizationProfile!
+
+  """the memberships of people"""
+  memberships(filters: MembershipFilter, pagination: OffsetPaginationInput): [Membership!]!
+
+  """the invites for this organization"""
+  invites(filters: OrganizationFilter, pagination: OffsetPaginationInput): [Invite!]!
+
+  """The roles that are available in the organization"""
+  roles: [Role!]!
+
+  """The name of this organization"""
+  name: String!
+}
+
+"""__doc__"""
+input OrganizationFilter {
+  search: String
+  name: StrFilterLookup
+  ids: [ID!]
+  AND: OrganizationFilter
+  OR: OrganizationFilter
+  NOT: OrganizationFilter
+  DISTINCT: Boolean
+}
+
+"\nA Profile of a User. A Profile can be used to display personalied information about a user.\n\n"
+type OrganizationProfile {
+  id: ID!
+
+  """A short bio of the user"""
+  bio: String
+
+  """The name of the user"""
+  name: String
+
+  """The avatar of the user"""
+  avatar: MediaStore
+}
+
+"""A Paragraph of text"""
+type ParagraphDescendant implements Descendant {
+  """
+  Unsafe children are not typed and fall back to json. This is a workaround if queries get too complex.
+  """
+  unsafeChildren: [UnsafeChild!]
+  kind: DescendantKind!
+  children: [Descendant!]
+  size: String
+}
+
+"""
+Temporary Credentials for a file upload that can be used by a Client (e.g. in a python datalayer)
+"""
+type PresignedPostCredentials {
+  key: String!
+  xAmzAlgorithm: String!
+  xAmzCredential: String!
+  xAmzDate: String!
+  xAmzSignature: String!
+  policy: String!
+  datalayer: String!
+  bucket: String!
+  store: String!
+}
+
+"\nA Profile of a User. A Profile can be used to display personalied information about a user.\n\n"
+type Profile {
+  id: ID!
+
+  """A short bio of the user"""
+  bio: String
+
+  """The name of the user"""
+  name: String
+
+  """The avatar of the user"""
+  avatar: MediaStore
+}
+
+type PublicSource {
+  """The kind of the public source. E.g. 'github'"""
+  kind: String!
+
+  """The url of the public source"""
+  url: String!
+}
+
+input PublicSourceInput {
+  kind: PublicSourceKind!
+  url: String!
+}
+
+enum PublicSourceKind {
+  GITHUB
+  WEBSITE
 }
 
 type Query {
+  _service: _Service!
   stashes(filters: StashFilter, pagination: OffsetPaginationInput): [Stash!]!
-  stashItems(
-    filters: StashItemFilter
-    pagination: OffsetPaginationInput
-  ): [StashItem!]!
-  apps: [App!]!
+  stashItems(filters: StashItemFilter, pagination: OffsetPaginationInput): [StashItem!]!
+  organizations(filters: OrganizationFilter, pagination: OffsetPaginationInput): [Organization!]!
+  devices(filters: DeviceFilter, pagination: OffsetPaginationInput): [Device!]!
+  apps(filters: AppFilter, pagination: OffsetPaginationInput): [App!]!
   releases: [Release!]!
   clients(filters: ClientFilter, pagination: OffsetPaginationInput): [Client!]!
-  compositions: [Composition!]!
   users(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
+  roles(filters: RoleFilter, pagination: OffsetPaginationInput): [Role!]!
   groups(filters: GroupFilter, pagination: OffsetPaginationInput): [Group!]!
   comments: [Comment!]!
-  rooms(filters: RoomFilter, pagination: OffsetPaginationInput): [Room!]!
-  redeemTokens(
-    filters: RedeemTokenFilter
-    pagination: OffsetPaginationInput
-  ): [RedeemToken!]!
+  services(filters: ServiceFilter, pagination: OffsetPaginationInput): [Service!]!
+  deviceGroups(filters: DeviceGroupFilter, pagination: OffsetPaginationInput): [DeviceGroup!]!
+  serviceInstances(filters: ServiceInstanceFilter, pagination: OffsetPaginationInput): [ServiceInstance!]!
+  serviceReleases(filters: ServiceReleaseFilter, pagination: OffsetPaginationInput): [ServiceRelease!]!
+  invites(filters: OrganizationFilter, pagination: OffsetPaginationInput): [Invite!]!
+  layers(filters: LayerFilter, pagination: OffsetPaginationInput): [Layer!]!
+  redeemTokens(filters: RedeemTokenFilter, pagination: OffsetPaginationInput): [RedeemToken!]!
   stash(id: ID!): Stash!
   stashItem(id: ID!): StashItem!
+  userStats(filters: UserFilter = null): UserStats!
   myStashes: [Stash!]!
+  mycontext: Context!
   user(id: ID!): User!
   me: User!
   group(id: ID!): Group!
   mygroups: [Group!]!
-  room(id: ID!): Room!
-  stream(id: ID!): Stream!
-  app(
-    id: ID = null
-    identifier: AppIdentifier = null
-    clientId: ID = null
-  ): App!
-  release(
-    id: ID
-    identifier: AppIdentifier
-    version: Version
-    clientId: ID
-  ): Release!
+  app(id: ID = null, identifier: AppIdentifier = null, clientId: ID = null): App!
+  release(id: ID = null, identifier: AppIdentifier = null, version: Version = null, clientId: ID = null): Release!
   client(id: ID = null, clientId: ID = null): Client!
   myManagedClients(kind: ClientKind!): Client!
   scopes: [Scope!]!
@@ -352,6 +852,330 @@ type Query {
   myActiveMessages: [SystemMessage!]!
   message(id: ID!): SystemMessage!
   hallo: String!
+  service(id: ID!): Service!
+  device(id: ID!): Device!
+  deviceByDeviceId(id: ID!): Device!
+  deviceGroup(id: ID!): DeviceGroup!
+  serviceRelease(id: ID!): ServiceRelease!
+  role(id: ID!): Role!
+  organization(id: ID!): Organization!
+  redeemToken(id: ID!): RedeemToken!
+  myRedeemTokens: [RedeemToken!]!
+  layer(id: ID!): Layer!
+  serviceInstance(id: ID!): ServiceInstance!
+}
+
+"""
+A redeem token is a token that can be used to redeem the rights to create
+a client. It is used to give the recipient the right to create a client.
+
+If the token is not redeemed within the expires_at time, it will be invalid.
+If the token has been redeemed, but the manifest has changed, the token will be invalid.
+"""
+type RedeemToken {
+  id: ID!
+
+  """The token of the redeem token"""
+  token: String!
+
+  """The client that this redeem token belongs to."""
+  client: Client
+
+  """The user that this redeem token belongs to."""
+  user: User!
+}
+
+"""
+A redeem token is a token that can be used to redeem the rights to create
+a client. It is used to give the recipient the right to create a client.
+
+If the token is not redeemed within the expires_at time, it will be invalid.
+If the token has been redeemed, but the manifest has changed, the token will be invalid.
+"""
+input RedeemTokenFilter {
+  search: String
+  ids: [ID!]
+  AND: RedeemTokenFilter
+  OR: RedeemTokenFilter
+  NOT: RedeemTokenFilter
+  DISTINCT: Boolean
+}
+
+input RedeemTokenInput {
+  token: String = null
+}
+
+input RegisterComChannelInput {
+  token: String!
+}
+
+"""
+A Release is a version of an app. Releases might change over time. E.g. a release might be updated to fix a bug, and the release might be updated to add a new feature. This is why they are the home for `scopes` and `requirements`, which might change over the release cycle.
+"""
+type Release {
+  id: ID!
+
+  """The app that this release belongs to."""
+  app: App!
+
+  """
+  The version of the release. This should be a string that identifies the version of the release. We enforce semantic versioning notation. E.g. `0.1.0`. The version is unique per app.
+  """
+  version: Version!
+
+  """
+  The name of the release. This should be a string that identifies the release beyond the version number. E.g. `canary`.
+  """
+  name: String!
+
+  """
+  The logo of the release. This should be a url to a logo that can be used to represent the release.
+  """
+  logo: MediaStore
+
+  """
+  The scopes of the release. Scopes are used to limit the access of a client to a user's data. They represent app-level permissions.
+  """
+  scopes: [String!]!
+
+  """
+  The requirements of the release. Requirements are used to limit the access of a client to a user's data. They represent app-level permissions.
+  """
+  requirements: [String!]!
+
+  """The clients of the release"""
+  clients(filters: ClientFilter, pagination: OffsetPaginationInput): [Client!]!
+}
+
+input RenderInput {
+  client: ID!
+  composition: ID = null
+  request: LinkingRequestInput = null
+  manifest: ManifestInput = null
+}
+
+input ReplyToCommentInput {
+  descendants: [DescendantInput!]!
+  parent: ID
+  notify: Boolean
+}
+
+input RequestMediaUploadInput {
+  key: String!
+  datalayer: String!
+}
+
+input RequirementInput {
+  service: String!
+  optional: Boolean! = false
+  description: String = null
+  key: String!
+}
+
+input ResolveCommentInput {
+  id: ID!
+  notify: Boolean
+}
+
+"""
+A Role is a set of permissions that can be assigned to a user. It is used to define what a user can do in the system.
+"""
+type Role {
+  id: ID!
+  identifier: String!
+  organization: Organization!
+  description: String!
+}
+
+"""__doc__"""
+input RoleFilter {
+  search: String
+  name: StrFilterLookup
+  ids: [ID!]
+  AND: RoleFilter
+  OR: RoleFilter
+  NOT: RoleFilter
+  DISTINCT: Boolean
+}
+
+"""
+A scope that can be assigned to a client. Scopes are used to limit the access of a client to a user's data. They represent app-level permissions.
+"""
+type Scope {
+  """The label of the scope. This is the human readable name of the scope."""
+  label: String!
+
+  """
+  The description of the scope. This is a human readable description of the scope.
+  """
+  description: String!
+
+  """
+  The value of the scope. This is the value that is used in the OAuth2 flow.
+  """
+  value: String!
+}
+
+"""
+A Service is a Webservice that a Client might want to access. It is not the configured instance of the service, but the service itself.
+"""
+type Service {
+  id: ID!
+
+  """The name of the service"""
+  name: String!
+
+  """
+  The identifier of the service. This should be a globally unique string that identifies the service. We encourage you to use the reverse domain name notation. E.g. `com.example.myservice`
+  """
+  identifier: ServiceIdentifier!
+
+  """
+  The description of the service. This should be a human readable description of the service.
+  """
+  description: String
+
+  """
+  The releases of the service. A service release is a specific version of a service. It will be configured by a configuration backend and will be used to send to the client as a configuration. It should never contain sensitive information.
+  """
+  releases(filters: ServiceReleaseFilter, pagination: OffsetPaginationInput): [ServiceRelease!]!
+
+  """
+  The logo of the app. This should be a url to a logo that can be used to represent the app.
+  """
+  logo: MediaStore
+}
+
+"""Service(id, name, identifier, logo, description)"""
+input ServiceFilter {
+  search: String
+  ids: [ID!]
+  AND: ServiceFilter
+  OR: ServiceFilter
+  NOT: ServiceFilter
+  DISTINCT: Boolean
+}
+
+"""
+The Service identifier is a unique identifier for a service. It is used to identify the service in the database and in the code. We encourage you to use the reverse domain name notation. E.g. `com.example.myservice`
+"""
+scalar ServiceIdentifier
+
+"""
+A ServiceInstance is a configured instance of a Service. It will be configured by a configuration backend and will be used to send to the client as a configuration. It should never contain sensitive information.
+"""
+type ServiceInstance {
+  id: ID!
+
+  """The service release that this instance belongs to."""
+  release: ServiceRelease!
+
+  """
+  The instance id of the instance. This is a unique string that identifies the instance. It is used to identify the instance in the code and in the database.
+  """
+  instanceId: ID!
+
+  """
+  The name of the instance. This is a human readable name of the instance.
+  """
+  name: String!
+
+  """The users that are allowed to use this instance."""
+  allowedUsers(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
+
+  """The users that are denied to use this instance."""
+  deniedUsers(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
+
+  """The groups that are allowed to use this instance."""
+  allowedGroups(filters: GroupFilter, pagination: OffsetPaginationInput): [Group!]!
+
+  """The groups that are denied to use this instance."""
+  deniedGroups(filters: GroupFilter, pagination: OffsetPaginationInput): [Group!]!
+
+  """
+  The mappings of the composition. A mapping is a mapping of a service to a service instance. This is used to configure the composition.
+  """
+  mappings: [ServiceInstanceMapping!]!
+
+  """
+  The logo of the app. This should be a url to a logo that can be used to represent the app.
+  """
+  logo: MediaStore
+
+  """
+  The aliases of the instance. An alias is a way to reach the instance. Clients can use these aliases to check if they can reach the instance. An alias can be an absolute alias (e.g. 'example.com') or a relative alias (e.g. 'example.com/path'). If the alias is relative, it will be relative to the layer's domain, port and path.
+  """
+  aliases: [InstanceAlias!]!
+}
+
+"""
+ServiceInstance(id, composition, release, logo, instance_id, private_key, steward, organization, device, template, public_key, token)
+"""
+input ServiceInstanceFilter {
+  search: String
+  ids: [ID!]
+  AND: ServiceInstanceFilter
+  OR: ServiceInstanceFilter
+  NOT: ServiceInstanceFilter
+  DISTINCT: Boolean
+}
+
+"""
+A ServiceInstance is a configured instance of a Service. It will be configured by a configuration backend and will be used to send to the client as a configuration. It should never contain sensitive information.
+"""
+type ServiceInstanceMapping {
+  id: ID!
+
+  """The service that this instance belongs to."""
+  instance: ServiceInstance!
+
+  """The client that this instance belongs to."""
+  client: Client!
+
+  """
+  The key of the instance. This is a unique string that identifies the instance. It is used to identify the instance in the code and in the database.
+  """
+  key: String!
+
+  """
+  Is this mapping optional? If a mapping is optional, you can configure the client without this mapping.
+  """
+  optional: Boolean!
+}
+
+"""
+A ServiceRelease is a specific release of a Service. It contains the configuration for a particular version of the service.
+"""
+type ServiceRelease {
+  id: ID!
+
+  """
+  The version of the service. This should be a human readable version string.
+  """
+  version: String!
+
+  """The service that this release belongs to."""
+  service: Service!
+
+  """
+  The description of the service. This should be a human readable description of the service.
+  """
+  description: String
+
+  """
+  The instances of the service. A service instance is a configured instance of a service. It will be configured by a configuration backend and will be used to send to the client as a configuration. It should never contain sensitive information.
+  """
+  instances(filters: ServiceInstanceFilter, pagination: OffsetPaginationInput): [ServiceInstance!]!
+}
+
+"""ServiceRelease(id, service, version)"""
+input ServiceReleaseFilter {
+  search: String
+  ids: [ID!]
+  AND: ServiceReleaseFilter
+  OR: ServiceReleaseFilter
+  NOT: ServiceReleaseFilter
+  DISTINCT: Boolean
 }
 
 "\nA Stash\n"
@@ -362,21 +1186,21 @@ type Stash {
   createdAt: DateTime!
   updatedAt: DateTime!
   isActive: Boolean!
-  items(
-    filters: StashItemFilter
-    pagination: OffsetPaginationInput
-  ): [StashItem!]!
+  items(filters: StashItemFilter, pagination: OffsetPaginationInput): [StashItem!]!
 
-  """
-  The number of items in the stash
-  """
+  """The number of items in the stash"""
   owner: User!
 }
 
-"""
-Date with time (isoformat)
-"""
-scalar DateTime
+"""__doc__"""
+input StashFilter {
+  search: String
+  ids: [ID!]
+  AND: StashFilter
+  OR: StashFilter
+  NOT: StashFilter
+  DISTINCT: Boolean
+}
 
 "\nA stashed item\n"
 type StashItem {
@@ -398,690 +1222,8 @@ input StashItemFilter {
   stashes: [ID!]
   AND: StashItemFilter
   OR: StashItemFilter
-}
-
-"""
-__doc__
-"""
-input StashFilter {
-  search: String
-  ids: [ID!]
-  AND: StashFilter
-  OR: StashFilter
-}
-
-"""
-An App is the Arkitekt equivalent of a Software Application. It is a collection of `Releases` that can be all part of the same application. E.g the App `Napari` could have the releases `0.1.0` and `0.2.0`.
-"""
-type App {
-  id: ID!
-
-  """
-  The name of the app
-  """
-  name: String!
-
-  """
-  The identifier of the app. This should be a globally unique string that identifies the app. We encourage you to use the reverse domain name notation. E.g. `com.example.myapp`
-  """
-  identifier: AppIdentifier!
-
-  """
-  The logo of the app. This should be a url to a logo that can be used to represent the app.
-  """
-  logo: String
-
-  """
-  The releases of the app. A release is a version of the app that can be installed by a user.
-  """
-  releases: [Release!]!
-}
-
-"""
-The App identifier is a unique identifier for an app. It is used to identify the app in the database and in the code. We encourage you to use the reverse domain name notation. E.g. `com.example.myapp`
-"""
-scalar AppIdentifier
-
-"""
-A Release is a version of an app. Releases might change over time. E.g. a release might be updated to fix a bug, and the release might be updated to add a new feature. This is why they are the home for `scopes` and `requirements`, which might change over the release cycle.
-"""
-type Release {
-  id: ID!
-
-  """
-  The app that this release belongs to.
-  """
-  app: App!
-
-  """
-  The version of the release. This should be a string that identifies the version of the release. We enforce semantic versioning notation. E.g. `0.1.0`. The version is unique per app.
-  """
-  version: Version!
-
-  """
-  The name of the release. This should be a string that identifies the release beyond the version number. E.g. `canary`.
-  """
-  name: String!
-
-  """
-  The logo of the release. This should be a url to a logo that can be used to represent the release.
-  """
-  logo: String
-
-  """
-  The scopes of the release. Scopes are used to limit the access of a client to a user's data. They represent app-level permissions.
-  """
-  scopes: [String!]!
-
-  """
-  The requirements of the release. Requirements are used to limit the access of a client to a user's data. They represent app-level permissions.
-  """
-  requirements: [String!]!
-
-  """
-  The clients of the release
-  """
-  clients(filters: ClientFilter, pagination: OffsetPaginationInput): [Client!]!
-}
-
-"""
-The `Version` represents a semver version string
-"""
-scalar Version
-
-"""
-A client is a way of authenticating users with a release.
- The strategy of authentication is defined by the kind of client. And allows for different authentication flow.
- E.g a client can be a DESKTOP app, that might be used by multiple users, or a WEBSITE that wants to connect to a user's account,
- but also a DEVELOPMENT client that is used by a developer to test the app. The client model thinly wraps the oauth2 client model, which is used to authenticate users.
-"""
-type Client {
-  id: ID!
-
-  """
-  The release that this client belongs to.
-  """
-  release: Release!
-
-  """
-  The user that manages this release.
-  """
-  tenant: User!
-
-  """
-  The configuration of the client. This is the configuration that will be sent to the client. It should never contain sensitive information.
-  """
-  kind: ClientKind!
-
-  """
-  The real oauth2 client that is used to authenticate users with this client.
-  """
-  oauth2Client: Oauth2Client!
-
-  """
-  Is this client public? If a client is public
-  """
-  public: Boolean!
-
-  """
-  The composition of the client.
-  """
-  composition: Composition!
-
-  """
-  If the client is a DEVELOPMENT client, which requires no further authentication, this is the user that is authenticated with the client.
-  """
-  user: User
-
-  """
-  The configuration of the client. This is the configuration that will be sent to the client. It should never contain sensitive information.
-  """
-  token: String!
-}
-
-enum ClientKind {
-  DEVELOPMENT
-  WEBSITE
-  DESKTOP
-}
-
-"""
-Application(id, client_id, user, redirect_uris, post_logout_redirect_uris, client_type, authorization_grant_type, client_secret, name, skip_authorization, created, updated, algorithm)
-"""
-type Oauth2Client {
-  id: ID!
-  name: String!
-  user: User!
-  clientType: String!
-  clientId: String!
-  algorithm: String!
-  authorizationGrantType: String!
-
-  """
-  Allowed URIs list, space separated
-  """
-  redirectUris: String!
-}
-
-"""
-A template for a configuration
-"""
-type Composition {
-  id: ID!
-
-  """
-  The name of the composition
-  """
-  name: String!
-
-  """
-  The template of the composition. This is a Jinja2 YAML template that will be rendered with the LinkingContext as context. The result of the rendering will be used to send to the client as a configuration. It should never contain sensitive information.
-  """
-  template: String!
-
-  """
-  The mappings of the composition. A mapping is a mapping of a service to a service instance. This is used to configure the composition.
-  """
-  mappings: [ServiceInstanceMapping!]!
-}
-
-"""
-A ServiceInstance is a configured instance of a Service. It will be configured by a configuration backend and will be used to send to the client as a configuration. It should never contain sensitive information.
-"""
-type ServiceInstanceMapping {
-  id: ID!
-
-  """
-  The service that this instance belongs to.
-  """
-  instance: ServiceInstance!
-
-  """
-  The composition that this instance belongs to.
-  """
-  composition: Composition!
-
-  """
-  The key of the instance. This is a unique string that identifies the instance. It is used to identify the instance in the code and in the database.
-  """
-  key: String!
-}
-
-"""
-A ServiceInstance is a configured instance of a Service. It will be configured by a configuration backend and will be used to send to the client as a configuration. It should never contain sensitive information.
-"""
-type ServiceInstance {
-  id: ID!
-
-  """
-  The service that this instance belongs to.
-  """
-  service: Service!
-
-  """
-  The backend that this instance belongs to.
-  """
-  backend: BackendType!
-
-  """
-  The composition that this instance belongs to.
-  """
-  composition: Composition!
-
-  """
-  The name of the instance. This is a human readable name of the instance.
-  """
-  name: String!
-
-  """
-  The identifier of the instance. This is a unique string that identifies the instance. It is used to identify the instance in the code and in the database.
-  """
-  identifier: String!
-}
-
-"""
-A Service is a Webservice that a Client might want to access. It is not the configured instance of the service, but the service itself.
-"""
-type Service {
-  """
-  The key of the service. This is a unique string that identifies the service. It is used to identify the service in the code and in the database.
-  """
-  key: String!
-  id: ID!
-
-  """
-  The name of the service
-  """
-  name: String!
-
-  """
-  The identifier of the service. This should be a globally unique string that identifies the service. We encourage you to use the reverse domain name notation. E.g. `com.example.myservice`
-  """
-  identifier: ServiceIdentifier!
-
-  """
-  The logo of the service. This should be a url to a logo that can be used to represent the service.
-  """
-  logo: String!
-
-  """
-  The description of the service. This should be a human readable description of the service.
-  """
-  description: String!
-}
-
-"""
-The Service identifier is a unique identifier for a service. It is used to identify the service in the database and in the code. We encourage you to use the reverse domain name notation. E.g. `com.example.myservice`
-"""
-scalar ServiceIdentifier
-
-enum BackendType {
-  DockerBackend
-  ConfigBackend
-}
-
-"""
-Client(id, composition, release, oauth2_client, kind, public, token, client_id, client_secret, tenant, user, created_at)
-"""
-input ClientFilter {
-  search: String
-  ids: [ID!]
-  AND: ClientFilter
-  OR: ClientFilter
-}
-
-"""
-Comments represent the comments of a user on a specific data item
-tart are identified by the unique combination of `identifier` and `object`.
-E.g a comment for an Image on the Mikro services would be serverd as
-`@mikro/image:imageID`.
-
-Comments always belong to the user that created it. Comments in threads
-get a parent attribute set, that points to the immediate parent.
-
-Each comment contains multiple descendents, that make up a *rich* representation
-of the underlying comment data including potential mentions, or links, or
-paragraphs.
-"""
-type Comment {
-  id: ID!
-
-  """
-  The object id of the object, on its associated service
-  """
-  object: String!
-
-  """
-  The identifier of the object. Consult the documentation for the format
-  """
-  identifier: Identifier!
-
-  """
-  The children of this comment
-  """
-  children: [Comment!]!
-
-  """
-  The parent of this comment. Think Thread
-  """
-  parent: Comment
-
-  """
-  The time this comment got created
-  """
-  createdAt: DateTime!
-
-  """
-  The users that got mentioned in this comment
-  """
-  mentions(filters: UserFilter, pagination: OffsetPaginationInput): [User!]!
-
-  """
-  The user that resolved this comment
-  """
-  resolvedBy: User
-
-  """
-  The user that created this comment
-  """
-  user: User!
-
-  """
-  The immediate descendends of the comments. Think typed Rich Representation
-  """
-  descendants: [Descendant!]!
-  resolved: Boolean!
-}
-
-"""
-The `Identifier` scalasr typsse represents a reference to a store previously created by the user n a datalayer
-"""
-scalar Identifier
-
-"""
-Room(id, title, description, creator)
-"""
-type Room {
-  id: ID!
-
-  """
-  The Title of the Room
-  """
-  title: String!
-  description: String!
-  messages(
-    filters: MessageFilter
-    pagination: OffsetPaginationInput
-  ): [Message!]!
-  agents(pagination: OffsetPaginationInput): [Agent!]!
-  streams: [Stream!]!
-}
-
-"""
-Message represent the message of an agent on a room
-"""
-type Message {
-  id: ID!
-  title: String!
-
-  """
-  A clear text representation of the rich comment
-  """
-  text: String!
-
-  """
-  The user that created this comment
-  """
-  agent: Agent!
-  attachedStructures(pagination: OffsetPaginationInput): [Structure!]!
-}
-
-"""
-Agent(id, room, name, app, user)
-"""
-type Agent {
-  id: ID!
-  room: Room!
-}
-
-"""
-Structure(id, identifier, object)
-"""
-type Structure {
-  id: ID!
-
-  """
-  The object id of the object, on its associated service
-  """
-  object: ID!
-
-  """
-  The identifier of the object. Consult the documentation for the format
-  """
-  identifier: String!
-}
-
-"""
-Message represent the message of an agent on a room
-"""
-input MessageFilter {
-  ids: [ID!]
-  search: String
-  AND: MessageFilter
-  OR: MessageFilter
-}
-
-"""
-Stream(id, agent, title, token)
-"""
-type Stream {
-  id: ID!
-
-  """
-  The agent that created this stream
-  """
-  agent: Agent!
-
-  """
-  The Title of the Stream
-  """
-  title: String!
-  token: String!
-}
-
-"""
-Room(id, title, description, creator)
-"""
-input RoomFilter {
-  search: String
-  ids: [ID!]
-  AND: RoomFilter
-  OR: RoomFilter
-}
-
-"""
-A redeem token is a token that can be used to redeed the rights to create
-a client. It is used to give the recipient the right to create a client.
-
-If the token is not redeemed within the expires_at time, it will be invalid.
-If the token has been redeemed, but the manifest has changed, the token will be invalid.
-"""
-type RedeemToken {
-  id: ID!
-
-  """
-  The token of the redeem token
-  """
-  token: String!
-
-  """
-  The client that this redeem token belongs to.
-  """
-  client: Client
-
-  """
-  The user that this redeem token belongs to.
-  """
-  user: User!
-}
-
-"""
-A redeem token is a token that can be used to redeed the rights to create
-a client. It is used to give the recipient the right to create a client.
-
-If the token is not redeemed within the expires_at time, it will be invalid.
-If the token has been redeemed, but the manifest has changed, the token will be invalid.
-"""
-input RedeemTokenFilter {
-  search: String
-  ids: [ID!]
-  AND: RedeemTokenFilter
-  OR: RedeemTokenFilter
-}
-
-"""
-A scope that can be assigned to a client. Scopes are used to limit the access of a client to a user's data. They represent app-level permissions.
-"""
-type Scope {
-  """
-  The label of the scope. This is the human readable name of the scope.
-  """
-  label: String!
-
-  """
-  The description of the scope. This is a human readable description of the scope.
-  """
-  description: String!
-
-  """
-  The value of the scope. This is the value that is used in the OAuth2 flow.
-  """
-  value: String!
-}
-
-"\nA System Message is a message that is sent to a user. \nIt can be used to notify the user of important events or to request their attention.\nSystem messages can use Rekuest Hooks as actions to allow the user to interact with the message.\n\n\n"
-type SystemMessage {
-  id: ID!
-  title: String!
-  message: String!
-
-  """
-  The action to take (e.g. the node)
-  """
-  action: String!
-  user: User!
-}
-
-type Mutation {
-  createUser(input: CreateUserInput!): User!
-  createComment(input: CreateCommentInput!): Comment!
-  createRoom(input: CreateRoomInput!): Room!
-  send(input: SendMessageInput!): Message!
-  replyTo(input: ReplyToCommentInput!): Comment!
-  resolveComment(input: ResolveCommentInput!): Comment!
-  createDevelopmentalClient(input: DevelopmentClientInput!): Client!
-  scan(input: ScanBackendInput!): String!
-  render(input: RenderInput!): Fakt!
-  acknowledgeMessage(input: AcknowledgeMessageInput!): SystemMessage!
-
-  """
-  Create a new stash
-  """
-  createStash(input: CreateStashInput!): Stash!
-
-  """
-  Update a stash
-  """
-  updateStash(input: UpdateStashInput!): Stash!
-
-  """
-  Add items to a stash
-  """
-  addItemsToStash(input: AddItemToStashInput!): [StashItem!]!
-
-  """
-  Delete items from a stash
-  """
-  deleteStashItems(input: DeleteStashItems!): [ID!]!
-  deleteStash(input: DeleteStashInput!): ID!
-  createStream(input: CreateStreamInput!): Stream!
-  leaveStream(input: LeaveStreamInput!): Stream!
-  joinStream(input: JoinStreamInput!): Stream!
-}
-
-input CreateUserInput {
-  name: String!
-}
-
-input CreateCommentInput {
-  descendants: [DescendantInput!]!
-  identifier: Identifier!
-  object: ID!
-  parent: ID = null
-  notify: Boolean = false
-}
-
-input DescendantInput {
-  kind: DescendantKind!
-  children: [DescendantInput!] = null
-  user: String = null
-  bold: Boolean = null
-  italic: Boolean = null
-  code: Boolean = null
-  text: String = null
-}
-
-input CreateRoomInput {
-  description: String = null
-  title: String = null
-}
-
-input SendMessageInput {
-  room: ID!
-  agentId: String!
-  text: String!
-  parent: ID = null
-  notify: Boolean = null
-  attachStructures: [StructureInput!] = null
-}
-
-input StructureInput {
-  object: ID!
-  identifier: String!
-}
-
-input ReplyToCommentInput {
-  descendants: [DescendantInput!]!
-  parent: ID
-  notify: Boolean
-}
-
-input ResolveCommentInput {
-  id: ID!
-  notify: Boolean
-}
-
-input DevelopmentClientInput {
-  manifest: ManifestInput!
-  composition: ID = null
-  requirements: [Requirement!]! = []
-}
-
-input ManifestInput {
-  identifier: String!
-  version: String!
-  logo: String = null
-  scopes: [String!]! = []
-}
-
-input Requirement {
-  service: String!
-  optional: Boolean! = false
-  description: String = null
-  key: String!
-}
-
-input ScanBackendInput {
-  backend: String = null
-}
-
-"""
-The `Fakt` scalar type represents a reference to a fakt
-"""
-scalar Fakt
-
-input RenderInput {
-  client: ID!
-  composition: ID = null
-  request: LinkingRequestInput = null
-  manifest: ManifestInput = null
-}
-
-input LinkingRequestInput {
-  host: String!
-  port: String!
-  isSecure: Boolean! = false
-}
-
-input AcknowledgeMessageInput {
-  id: ID!
-  acknowledged: Boolean!
-}
-
-input CreateStashInput {
-  name: String = null
-  description: String = null
-}
-
-input UpdateStashInput {
-  stash: ID!
-  name: String!
-  description: String = null
-}
-
-input AddItemToStashInput {
-  stash: ID!
-  items: [StashItemInput!]!
+  NOT: StashItemFilter
+  DISTINCT: Boolean
 }
 
 input StashItemInput {
@@ -1090,43 +1232,177 @@ input StashItemInput {
   object: String!
 }
 
-input DeleteStashItems {
-  items: [ID!]!
-}
-
-input DeleteStashInput {
-  stash: ID!
-}
-
-input CreateStreamInput {
-  room: ID!
-  title: String = null
-  agentId: String = null
-}
-
-input LeaveStreamInput {
-  id: ID!
-}
-
-input JoinStreamInput {
-  id: ID!
+input StrFilterLookup {
+  exact: String
+  iExact: String
+  contains: String
+  iContains: String
+  inList: [String!]
+  gt: String
+  gte: String
+  lt: String
+  lte: String
+  startsWith: String
+  iStartsWith: String
+  endsWith: String
+  iEndsWith: String
+  range: [String!]
+  isNull: Boolean
+  regex: String
+  iRegex: String
 }
 
 type Subscription {
   communications(channels: [ID!]!): Communication!
   mentions: Comment!
-  room(room: ID!, agentId: ID!, filterOwn: Boolean! = true): RoomEvent!
+}
+
+"\nA System Message is a message that is sent to a user. \nIt can be used to notify the user of important events or to request their attention.\nSystem messages can use Rekuest Hooks as actions to allow the user to interact with the message.\n\n\n"
+type SystemMessage {
+  id: ID!
+  title: String!
+  message: String!
+
+  """The action to take (e.g. the node)"""
+  action: String!
+  user: User!
+}
+
+type TimeBucket {
+  ts: DateTime!
+  count: Int!
+  distinctCount: Int!
+  max: Float
+  min: Float
+  avg: Float
+  sum: Float
 }
 
 """
-A Communication
+The `Identifier` scalasr typsse represents a reference to a store previously created by the user n a datalayer
 """
-type Communication {
-  channel: ID!
+scalar UnsafeChild
+
+input UpdateDeviceInput {
+  id: ID!
+  name: String
 }
 
-type RoomEvent {
-  message: Message
-  join: Agent
-  leave: Agent
+input UpdateGroupProfileInput {
+  id: ID!
+  name: String!
+  avatar: ID!
+}
+
+input UpdateOrganizationInput {
+  id: ID!
+  name: String = null
+  description: String = null
+  avatar: ID = null
+  slug: String = null
+}
+
+input UpdateProfileInput {
+  id: ID!
+  name: String!
+  avatar: ID!
+}
+
+input UpdateServiceInstanceInput {
+  allowedUsers: [ID!] = null
+  allowedGroups: [ID!] = null
+  deniedGroups: [ID!] = null
+  deniedUsers: [ID!] = null
+  id: ID!
+}
+
+input UpdateStashInput {
+  stash: ID!
+  name: String!
+  description: String = null
+}
+
+"\nA User is a person that can log in to the system. They are uniquely identified by their username.\nAnd can have an email address associated with them (but don't have to).\n\nA user can be assigned to groups and has a profile that can be used to display information about them.\nDetail information about a user can be found in the profile.\n\nAll users can have social accounts associated with them. These are used to authenticate the user with external services,\nsuch as ORCID or GitHub.\n\n"
+type User {
+  id: ID!
+
+  """Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only."""
+  username: String!
+  firstName: String
+  lastName: String
+  email: String
+
+  """
+  The groups this user belongs to. A user will get all permissions granted to each of their groups.
+  """
+  groups(filters: GroupFilter, pagination: OffsetPaginationInput): [Group!]!
+
+  """The memberships of the user in organizations"""
+  memberships(filters: MembershipFilter, pagination: OffsetPaginationInput): [Membership!]!
+  avatar: String
+  profile: Profile!
+  managedClients: [DjangoModelType!]!
+
+  """The communication channels that the user has"""
+  comChannels(filters: OrganizationFilter, pagination: OffsetPaginationInput): [ComChannel!]!
+}
+
+"""Numeric/aggregatable fields of User"""
+enum UserField {
+  CREATED_AT
+}
+
+"""
+A User of the System
+
+Lok Users are the main users of the system. They can be assigned to groups and have profiles, that can be used to display information about them.
+Each user is identifier by a unique username, and can have an email address associated with them.
+"""
+input UserFilter {
+  search: String
+
+  """Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only."""
+  username: StrFilterLookup
+  ids: [ID!]
+  AND: UserFilter
+  OR: UserFilter
+  NOT: UserFilter
+  DISTINCT: Boolean
+}
+
+type UserStats {
+  """Total number of items in the selection"""
+  count: Int!
+
+  """Number of distinct values for the field"""
+  distinctCount(field: UserField!): Int!
+
+  """Maximum"""
+  max(field: UserField!): Float
+
+  """Minimum"""
+  min(field: UserField!): Float
+
+  """Average"""
+  avg(field: UserField!): Float
+
+  """Sum"""
+  sum(field: UserField!): Float
+
+  """Time-bucketed stats over a datetime field."""
+  series(field: UserField!, timestampField: UserTimestampField!, by: Granularity!): [TimeBucket!]!
+}
+
+"""Datetime fields of User for bucketing"""
+enum UserTimestampField {
+  CREATED_AT
+}
+
+"""The `Version` represents a semver version string"""
+scalar Version
+
+scalar _Any
+
+type _Service {
+  sdl: String!
 }

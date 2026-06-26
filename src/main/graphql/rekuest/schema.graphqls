@@ -1,17 +1,599 @@
-"""Make string uppercase"""
-directive @upper on FIELD
+directive @auth(required_scopes: [String!] = null, required_roles: [String!] = null) on FIELD_DEFINITION
 
-directive @replace(old: String!, new: String!) on FIELD
+directive @oneOf on INPUT_OBJECT
 
-"""Make get stuff uppercase"""
-directive @relation(on: String!) on FIELD
+schema @link(url: "https://specs.apollo.dev/federation/v2.11", import: ["@key"]) {
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
+}
 
-type SliderAssignWidget implements AssignWidget {
-  kind: AssignWidgetKind!
-  followValue: String
-  min: Float
-  max: Float
-  step: Float
+input AckInput {
+  assignation: ID!
+}
+
+"""Represents an executable action in the system."""
+type Action {
+  """Unique ID of the action."""
+  id: ID!
+
+  """Unique hash identifying the action definition."""
+  hash: ActionHash!
+
+  """Name of the action."""
+  name: String!
+
+  """Key of the action, used for grouping and identification."""
+  key: String!
+
+  """The app this action belongs to."""
+  app: App!
+
+  """
+  An optional icon identifier to represent this Action in the UI (e.g. 'fa-solid fa-dog')
+  """
+  logo: String
+
+  """Version string of the action."""
+  version: String!
+
+  """The kind or category of the action."""
+  kind: ActionKind!
+
+  """Indicates whether the action maintains state."""
+  stateful: Boolean!
+
+  """Optional description of the action."""
+  description: String
+
+  """Collections to which this action belongs."""
+  collections: [Collection!]!
+
+  """List of implementations for this action."""
+  implementations(filters: ImplementationFilter, ordering: [ImplementationOrder!]! = [], pagination: OffsetPaginationInput): [Implementation!]!
+
+  """Scope of the action, e.g., user or system."""
+  scope: ActionScope!
+
+  """Actions for which this is a test."""
+  isTestFor(filters: ActionFilter, ordering: [ActionOrder!]! = [], pagination: OffsetPaginationInput): [Action!]!
+
+  """Marks whether the action is in development."""
+  isDev: Boolean!
+
+  """List of tests associated with the action."""
+  tests(filters: ActionFilter, ordering: [ActionOrder!]! = [], pagination: OffsetPaginationInput): [Action!]!
+
+  """Interfaces implemented by the action."""
+  interfaces: [String!]!
+
+  """Protocols associated with the action."""
+  protocols(filters: ProtocolFilter, ordering: [ProtocolOrder!]! = [], pagination: OffsetPaginationInput): [Protocol!]!
+
+  """Timestamp when the action was defined."""
+  definedAt: DateTime!
+
+  """Test cases for this action."""
+  testCases(filters: TestCaseFilter, pagination: OffsetPaginationInput): [TestCase!]
+
+  """The organization that owns this action."""
+  organization: Organization!
+
+  """Assignations created for this action."""
+  assignations(filters: AssignationFilter, ordering: [AssignationOrder!]! = [], pagination: OffsetPaginationInput): [Assignation!]!
+
+  """Get the latest completed assignation for this action."""
+  latestAssignation: Assignation
+
+  """Retrieve assignations where this action has run."""
+  runs: [Assignation!]
+
+  """Input arguments (ports) for the action."""
+  args: [ArgPort!]!
+
+  """Output values (ports) returned by the action."""
+  returns: [ReturnPort!]!
+
+  """Port groups used in the action for organizing ports."""
+  portGroups: [PortGroup!]!
+
+  """Check if the current user has pinned this action."""
+  pinned: Boolean!
+}
+
+"""A JSON-serializable argument entry for a multi-agent action trigger."""
+type ActionArgument {
+  key: String
+  valueLiteral: JSONSerializable
+  valuePath: String
+  agentCall: AgentCall
+  utilCall: UtilCall
+  valueList: [ActionArgument!]
+  valueDict: [ActionArgument!]
+}
+
+"""A JSON-serializable argument entry for a multi-agent action trigger."""
+input ActionArgumentInput {
+  key: String = null
+  valueLiteral: JSONSerializable = null
+  valuePath: String = null
+  agentCall: AgentCallInput = null
+  utilCall: UtilCallInput = null
+  valueList: [ActionArgumentInput!] = null
+  valueDict: [ActionArgumentInput!] = null
+}
+
+"""Input model for action demand."""
+type ActionDemand {
+  key: String!
+  hash: ActionHash
+  name: String
+  description: String
+  argMatches: [PortMatch!]
+  returnMatches: [PortMatch!]
+  protocols: [ID!]
+  forceArgLength: Int
+  forceReturnLength: Int
+}
+
+"""The input for creating a action demand."""
+input ActionDemandInput {
+  """
+  The hash of the action. This is used to identify the action in the system.
+  """
+  hash: ActionHash = null
+
+  """
+  The name of the action. This is used to identify the action in the system.
+  """
+  name: String = null
+
+  """
+  The demands for the action args and returns. This is used to identify the demand in the system.
+  """
+  argMatches: [PortMatchInput!] = null
+
+  """
+  The demands for the action args and returns. This is used to identify the demand in the system.
+  """
+  returnMatches: [PortMatchInput!] = null
+
+  """
+  Require that the action has a specific number of args. This is used to identify the demand in the system.
+  """
+  forceArgLength: Int = null
+
+  """
+  Require that the action has a specific number of returns. This is used to identify the demand in the system.
+  """
+  forceReturnLength: Int = null
+}
+
+"""
+A dependency for a implementation. By defining dependencies, you can
+    create a dependency graph for your implementations and actions
+"""
+input ActionDependencyInput {
+  """
+  The name of the action. This is used to identify the action in the system.
+  """
+  name: String = null
+  key: String!
+  description: String = null
+  actionKey: String = null
+  app: String = null
+  argMatches: [PortMatchInput!] = null
+  returnMatches: [PortMatchInput!] = null
+  protocols: [ID!] = null
+  forceArgLength: Int = null
+  forceReturnLength: Int = null
+  optional: Boolean! = false
+  allowInactive: Boolean = true
+}
+
+"""Numeric/aggregatable fields of Action"""
+enum ActionField {
+  CREATED_AT
+}
+
+input ActionFilter {
+  name: StrFilterLookup
+  AND: ActionFilter
+  OR: ActionFilter
+  NOT: ActionFilter
+  DISTINCT: Boolean
+  search: String
+  ids: [ID!]
+  demands: [PortDemandInput!]
+  protocols: [String!]
+  kind: ActionKind
+  inCollection: String
+  usedBefore: DateTime
+  usedAfter: DateTime
+  stateful: Boolean
+
+  """Filter using app identifier"""
+  appIdentifier: String
+}
+
+"""
+The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
+"""
+scalar ActionHash
+
+"""The kind of action."""
+enum ActionKind {
+  FUNCTION
+  GENERATOR
+}
+
+input ActionOrder @oneOf {
+  definedAt: Ordering
+  usedAt: Ordering
+}
+
+enum ActionScope {
+  GLOBAL
+  LOCAL
+  BRIDGE_GLOBAL_TO_LOCAL
+  BRIDGE_LOCAL_TO_GLOBAL
+}
+
+type ActionStats {
+  """Total number of items in the selection"""
+  count: Int!
+
+  """Number of distinct values for the field"""
+  distinctCount(field: ActionField!): Int!
+
+  """Maximum"""
+  max(field: ActionField!): Float
+
+  """Minimum"""
+  min(field: ActionField!): Float
+
+  """Average"""
+  avg(field: ActionField!): Float
+
+  """Sum"""
+  sum(field: ActionField!): Float
+
+  """Time-bucketed stats over a datetime field."""
+  series(field: ActionField!, timestampField: ActionTimestampField!, by: Granularity!): [TimeBucket!]!
+}
+
+"""Datetime fields of Action for bucketing"""
+enum ActionTimestampField {
+  CREATED_AT
+}
+
+"""Represents a compute agent that can execute implementations."""
+type Agent {
+  """Unique ID of the agent."""
+  id: ID!
+
+  """Hash representing the agent's definition for change detection."""
+  hash: String!
+
+  """The client (app instance) this agent runs as."""
+  client: Client!
+
+  """User associated with the agent."""
+  user: User!
+
+  """The organization this agent belongs to."""
+  organization: Organization!
+
+  """Historical records of agent's hardware."""
+  hardwareRecords(filters: HardwareRecordFilter, pagination: OffsetPaginationInput): [HardwareRecord!]!
+
+  """Implementations the agent can run."""
+  implementations(filters: ImplementationFilter, ordering: [ImplementationOrder!]! = [], pagination: OffsetPaginationInput): [Implementation!]!
+
+  """Agent's associated memory shelve."""
+  memoryShelve: MemoryShelve
+
+  """Filesystem shelves available on the agent."""
+  fileSystemShelves(filters: FilesystemShelveFilter, pagination: OffsetPaginationInput): [FilesystemShelve!]!
+
+  """Last timestamp this agent was seen."""
+  lastSeen: DateTime
+
+  """Is the agent currently connected."""
+  connected: Boolean!
+
+  """Agent name."""
+  name: String!
+
+  """Current and historical states associated with the agent."""
+  states: [State!]!
+
+  """Kind of the agent."""
+  kind: AgentKind!
+
+  """Webhook URL for this Agent (only if webhook)"""
+  hookUrl: String
+
+  """Webhook URL secret for this Agent (only if webhook)"""
+  hookUrlSecret: String
+
+  """Assignations executed by this agent."""
+  assignations(filters: AssignationFilter, ordering: [AssignationOrder!]! = [], pagination: OffsetPaginationInput): [Assignation!]!
+
+  """The app this agent belongs to."""
+  app: App!
+
+  """The release this agent belongs to."""
+  release: Release!
+
+  """Placements associated with this agent."""
+  placements(filters: PlacementFilter, ordering: [PlacementOrder!]! = [], pagination: OffsetPaginationInput): [Placement!]!
+
+  """Sessions associated with this agent."""
+  sessions(filters: SessionFilter, ordering: [SessionOrder!]! = [], pagination: OffsetPaginationInput): [Session!]!
+
+  """Blok mappings associated with this agent."""
+  agentMappings: [BlokAgentMapping!]!
+
+  """Device associated with the agent, via its client (if any)."""
+  device: Device
+
+  """Fetch a specific implementation by interface."""
+  implementation(interface: String!): Implementation
+
+  """
+  Determine if the agent is currently active based on last seen timestamp.
+  """
+  active: Boolean!
+
+  """Retrieve the latest hardware record for this agent."""
+  latestHardwareRecord: HardwareRecord
+
+  """Check if this agent is pinned by the current user."""
+  pinned: Boolean!
+
+  """Get the count of implementations available on this agent."""
+  blocked: Boolean!
+}
+
+"""
+Defines a callback that routes user interactions directly to an Arkitekt Agent via Rekuest.
+"""
+type AgentCall {
+  dependency: String!
+  operation: String!
+  arguments: [ActionArgument!]
+}
+
+"""
+Defines a callback that routes user interactions directly to an Arkitekt Agent via Rekuest.
+"""
+input AgentCallInput {
+  dependency: String!
+  operation: String!
+  arguments: [ActionArgumentInput!] = null
+}
+
+type AgentChangeEvent {
+  update: Agent
+  create: Agent
+  delete: ID
+}
+
+"""
+A dependency for a implementation. By defining dependencies, you can
+    create a dependency graph for your implementations and actions
+"""
+input AgentDependencyInput {
+  """
+  The name of the agent. This is used to identify the agent in the system.
+  """
+  name: String = null
+
+  """
+  A list of keys of other agent dependencies that are mutually exclusive with this one. This means two agent dependencies with mutually exclusive keys cannot be assigned to the same implementing agent. This is used to identify the demand in the system.
+  """
+  mutuallyExclusiveKeys: [String!] = null
+  key: String!
+  app: String = null
+  version: String = null
+  description: String = null
+  optional: Boolean! = false
+  actionDemands: [ActionDependencyInput!] = null
+  stateDemands: [StateDependencyInput!] = null
+  autoResolvable: Boolean! = false
+  minViableInstances: Int = null
+  maxViableInstances: Int = null
+  preferedInstances: Int = null
+}
+
+"""A way to filter agents"""
+input AgentFilter {
+  AND: AgentFilter
+  OR: AgentFilter
+  NOT: AgentFilter
+  DISTINCT: Boolean
+
+  """Filter by scope"""
+  scope: ScopeFilter
+
+  """Filter by client ID of the app the agent is registered to"""
+  clientId: String
+
+  """Filter by IDs of the agents"""
+  ids: [ID!]
+
+  """Filter by implementations of the agents"""
+  hasImplementations: [String!]
+
+  """Filter by states of the agents"""
+  hasStates: [String!]
+
+  """Filter by pinned agents"""
+  pinned: Boolean
+
+  """Filter by name of the agents"""
+  search: String
+  dependency: ID
+  blokDependency: ID
+  threeDModel: ID
+  distinct: Boolean
+  actionDemands: [ActionDemandInput!]
+  stateDemands: [SchemaDemandInput!]
+
+  """Filter by user ID"""
+  user: ID
+
+  """Filter using app identifier"""
+  appIdentifier: ID
+
+  """Filter based on version string"""
+  versionNumber: String
+
+  """Filter based on device"""
+  deviceId: ID
+}
+
+input AgentInput {
+  """
+  The name of the agent. This is used to identify the agent in the system.
+  """
+  name: String = null
+}
+
+enum AgentKind {
+  WEBSOCKET
+  WEBHOOK
+}
+
+type AgentMapping {
+  """Get the agent's name from the mapping."""
+  agent: Agent!
+
+  """Get the agent's ID from the mapping."""
+  agentId: String!
+
+  """Get a specific argument by key."""
+  mappedImplementations: [ImplementationMapping!]!
+}
+
+input AgentOrder @oneOf {
+  lastSeen: Ordering
+}
+
+"""A plain snapshot of a state's current value."""
+type AgentSnapshotEvent {
+  agentId: ID!
+  values: Args!
+  globalRevision: Int!
+  sessionId: String!
+  timestamp: DateTime!
+}
+
+union AgentSnapshotEventStatePatchEvent = AgentSnapshotEvent | StatePatchEvent
+
+type AgentWithValues {
+  """The ID of the agent this state belongs to"""
+  agentId: ID!
+
+  """The state value, indexed by state_interface"""
+  values: JSON!
+
+  """The maximum global revision across these states"""
+  globalRevision: Int!
+
+  """The patches to move forward"""
+  forwardPatches: [Patch!]!
+
+  """The patches to move backward"""
+  backwardPatches: [Patch!]!
+}
+
+"""
+The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
+"""
+scalar AnyDefault
+
+"""Profile information for a user."""
+type App {
+  """Unique ID of the app."""
+  id: ID!
+
+  """Name of the app."""
+  identifier: String!
+}
+
+"""The `Arg` scalar type represents a an Argument in a Action assignment"""
+scalar Arg
+
+type ArgPort {
+  key: String!
+  label: String
+  kind: PortKind!
+  description: String
+  identifier: Identifier
+  nullable: Boolean!
+  effects: [Effect!]
+  default: AnyDefault
+  children: [ArgPort!]
+  choices: [Choice!]
+  validators: [Validator!]
+  widget: AssignWidget
+  requires: [Requires!]
+}
+
+"Port\n\n    A Port is a single input or output of a action. It is composed of a key and a kind\n    which are used to uniquely identify the port.\n\n    If the Port is a structure, we need to define a identifier and scope,\n    Identifiers uniquely identify a specific type of model for the scopes (e.g\n    all the ports that have the identifier \"@mikro/image\" are of the same type, and\n    are hence compatible with each other). Scopes are used to define in which context\n    the identifier is valid (e.g. a port with the identifier \"@mikro/image\" and the\n    scope \"local\", can only be wired to other ports that have the same identifier and\n    are running in the same app). Global ports are ports that have the scope \"global\",\n    and can be wired to any other port that has the same identifier, as there exists a\n    mechanism to resolve and retrieve the object for each app. Please check the rekuest\n    documentation for more information on how this works.\n\n\n    "
+input ArgPortInput {
+  validators: [ValidatorInput!] = null
+  key: String!
+  label: String = null
+  kind: PortKind!
+  description: String = null
+  identifier: String = null
+  nullable: Boolean! = false
+  effects: [EffectInput!] = null
+  default: AnyDefault = null
+  choices: [ChoiceInput!] = null
+  widget: AssignWidgetInput = null
+  requires: [RequiresInput!] = null
+  children: [ArgPortInput!] = null
+}
+
+"""The `Args` scalar type represents a Dictionary of arguments"""
+scalar Args
+
+"""The input for assigning args to a action."""
+input AssignInput {
+  """
+  The policy for the assignation. This defines how the assignation should be handled.
+  """
+  policy: AssignPolicy = null
+  action: ID = null
+  dependency: String = null
+  resolution: ID = null
+  implementation: ID = null
+  agent: ID = null
+  actionHash: ActionHash = null
+  method: String = null
+  interface: String = null
+  hooks: [HookInput!] = null
+  args: Args!
+  reference: String = null
+  parent: ID = null
+  cached: Boolean!
+  log: Boolean!
+  capture: Boolean!
+  ephemeral: Boolean!
+  dependencies: [ResolvedDependencyInput!] = null
+  isHook: Boolean = null
+  step: Boolean = null
+}
+
+enum AssignPolicy {
+  AUTOMATIC
+  ROUND_ROBIN
+  LEAST_BUSY
+  FASTEST_RESPONSE
 }
 
 interface AssignWidget {
@@ -19,6 +601,32 @@ interface AssignWidget {
   followValue: String
 }
 
+input AssignWidgetInput {
+  """
+  Whether to display the input as a paragraph or not. This is used for text inputs and dropdowns
+  """
+  asParagraph: Boolean = null
+  kind: AssignWidgetKind!
+  query: SearchQuery = null
+  choices: [ChoiceInput!] = null
+  min: Float = null
+  max: Float = null
+  step: Float = null
+  placeholder: String = null
+  hook: String = null
+  ward: String = null
+  fallback: AssignWidgetInput = null
+  filters: [ArgPortInput!] = null
+  dependencies: [String!] = []
+  dependency: String = null
+  targetDependency: String = null
+  targetAction: String = null
+  targetPort: String = null
+  statePath: String = null
+  stateAccessors: [StateAccessorInput!] = null
+}
+
+"""The kind of assign widget."""
 enum AssignWidgetKind {
   SEARCH
   CHOICE
@@ -26,6 +634,416 @@ enum AssignWidgetKind {
   CUSTOM
   STRING
   STATE_CHOICE
+  PROXY
+}
+
+"""Tracks the assignment of an implementation to a specific task."""
+type Assignation {
+  """Unique ID of the assignation."""
+  id: ID!
+
+  """Optional external reference for tracking."""
+  reference: String
+
+  """Indicates if the assignation is completed."""
+  isDone: Boolean!
+
+  """Arguments used in the assignation."""
+  args: AnyDefault!
+
+  """The used dependencies for this assignemnet"""
+  dependencies: AnyDefault!
+
+  """Resolution used to resolve dependencies for this assignation."""
+  resolution: Resolution
+
+  """Root assignation in the creation chain."""
+  root: Assignation
+
+  """Parent assignation that triggered this one."""
+  parent: Assignation
+
+  """Action assigned."""
+  action: Action!
+
+  """
+  Indicates if the assignation is being captured for logging or debugging.
+  """
+  capture: Boolean!
+
+  """Implementation assigned to execute."""
+  implementation: Implementation!
+
+  """Type of the latest event."""
+  latestEventKind: AssignationEventKind!
+
+  """Last instruction type."""
+  latestInstructKind: AssignationInstructKind!
+
+  """Caller that created this assignation."""
+  caller: Caller
+
+  """Creation timestamp."""
+  createdAt: DateTime!
+
+  """Last update timestamp."""
+  updatedAt: DateTime!
+
+  """Timestamp when the assignation was finished."""
+  finishedAt: DateTime
+
+  """List of resources or entities this assignation acted upon."""
+  actedOn: [String!]!
+
+  """Indicates if the assignation should be deleted after completion."""
+  ephemeral: Boolean!
+
+  """Child assignations spawned from this one."""
+  children(filters: AssignationFilter, ordering: [AssignationOrder!]! = [], pagination: OffsetPaginationInput): [Assignation!]!
+
+  """Agent responsible for this assignation."""
+  agent: Agent
+
+  """The events"""
+  events(filters: AssignationEventFilter, ordering: [AssignationEventOrder!]! = [], pagination: OffsetPaginationInput): [AssignationEvent!]!
+
+  """The dependency thats linked to the parents execution if applicable."""
+  dependency: String
+
+  """
+  The method of the dependency that caused this assignation, if applicable.
+  """
+  dependencyMethod: String
+
+  """Get a specific dependency by key."""
+  resolvedDependencies: [ResolvedAgentDependency!]!
+
+  """List of recent instructions for this assignation."""
+  instructs: [AssignationInstruct!]!
+
+  """Get a specific argument by key."""
+  arg(key: String!): Args
+}
+
+type AssignationChangeEvent {
+  event: AssignationEvent
+  create: Assignation
+}
+
+"""An event that occurred during an assignation."""
+type AssignationEvent {
+  """Unique ID of the event."""
+  id: ID!
+
+  """Name of the event."""
+  name: String!
+
+  """Optional return values."""
+  returns: AnyDefault
+
+  """Associated assignation."""
+  assignation: Assignation!
+
+  """Kind of assignation event."""
+  kind: AssignationEventKind!
+
+  """Optional message associated with the event."""
+  message: String
+
+  """Progress percentage."""
+  progress: Int
+
+  """Time when event was created."""
+  createdAt: DateTime!
+
+  """If this event was delegated, the assignation it was delegated to."""
+  delegatedTo: Assignation
+
+  """Default log level."""
+  level: LogLevel!
+
+  """Reference string for the event."""
+  reference: String!
+}
+
+"""A way to filter assignation events"""
+input AssignationEventFilter {
+  AND: AssignationEventFilter
+  OR: AssignationEventFilter
+  NOT: AssignationEventFilter
+  DISTINCT: Boolean
+  kind: [AssignationEventKind!]
+}
+
+"""The event kind of the assignationevent"""
+enum AssignationEventKind {
+  BOUND
+  QUEUED
+  ASSIGN
+  PROGRESS
+  DELEGATE
+  DISCONNECTED
+  YIELD
+  DONE
+  LOG
+  CANCELING
+  CANCELLED
+  INTERUPTING
+  INTERUPTED
+  ERROR
+  CRITICAL
+}
+
+input AssignationEventOrder @oneOf {
+  createdAt: Ordering
+}
+
+"""Numeric/aggregatable fields of Assignation"""
+enum AssignationField {
+  CREATED_AT
+}
+
+input AssignationFilter {
+  AND: AssignationFilter
+  OR: AssignationFilter
+  NOT: AssignationFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  status: [AssignationStatus!]
+  clientId: ID
+  state: [AssignationEventKind!]
+  implementation: ID
+  actedOn: [String!]
+  createdBefore: DateTime
+  createdAfter: DateTime
+  agent: ID
+}
+
+"""An instruct event for a specific assignation."""
+type AssignationInstruct {
+  """Unique ID of the instruct event."""
+  id: ID!
+
+  """Assignation the instruction relates to."""
+  assignation: Assignation!
+
+  """Type of instruction."""
+  kind: AssignationInstructKind!
+
+  """Time when instruction was issued."""
+  createdAt: DateTime!
+}
+
+"""The event kind of the assignationevent"""
+enum AssignationInstructKind {
+  ASSIGN
+  CANCEL
+  STEP
+  RESUME
+  PAUSE
+  INTERRUPT
+  COLLECT
+}
+
+input AssignationOrder @oneOf {
+  createdAt: Ordering
+  startedAt: Ordering
+  finishedAt: Ordering
+  status: Ordering
+}
+
+type AssignationStats {
+  """Total number of items in the selection"""
+  count: Int!
+
+  """Number of distinct values for the field"""
+  distinctCount(field: AssignationField!): Int!
+
+  """Maximum"""
+  max(field: AssignationField!): Float
+
+  """Minimum"""
+  min(field: AssignationField!): Float
+
+  """Average"""
+  avg(field: AssignationField!): Float
+
+  """Sum"""
+  sum(field: AssignationField!): Float
+
+  """Time-bucketed stats over a datetime field."""
+  series(field: AssignationField!, timestampField: AssignationTimestampField!, by: Granularity!): [TimeBucket!]!
+}
+
+"""The event kind of the assignationevent"""
+enum AssignationStatus {
+  ASSIGNING
+  ONGOING
+  CRITICAL
+  CANCELLED
+  DONE
+}
+
+"""Datetime fields of Assignation for bucketing"""
+enum AssignationTimestampField {
+  CREATED_AT
+}
+
+input AutoResolveInput {
+  action: ID!
+}
+
+"""The input for bouncing an agent."""
+input BlockInput {
+  agent: ID!
+  reason: String = null
+}
+
+type Blok {
+  id: ID!
+  name: String!
+  description: String
+  creator: User!
+  catalog: UICatalog!
+
+  """Materialized bloks that are instances of this blok."""
+  materializedBloks(filters: MaterializedBlokFilter, ordering: [MaterializedBlokOrder!]! = [], pagination: OffsetPaginationInput): [MaterializedBlok!]!
+
+  """Dependencies that need to be resolved for this blok."""
+  dependencies(filters: BlokDependencyFilter, pagination: OffsetPaginationInput): [BlokDependency!]!
+
+  """List of action demands specified in this blok."""
+  components: [ComponentNode!]!
+
+  """List of action demands specified in this blok."""
+  uiComponents: Props!
+
+  """List of action demands specified in this blok."""
+  demoState: Props!
+}
+
+type BlokAgentMapping {
+  id: ID!
+  key: String!
+  agent: Agent!
+  materializedBlok: MaterializedBlok!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+"""The input for updating a blok."""
+input BlokAgentMappingInput {
+  agent: ID!
+  key: String!
+}
+
+"""Represents a dependency between implementations and actions."""
+type BlokDependency {
+  """Unique ID of the dependency."""
+  id: ID!
+
+  """The implementation this dependency belongs to."""
+  implementation: Implementation!
+
+  """Optional string identifier or tag for reference."""
+  key: String!
+
+  """Indicates if the dependency is optional."""
+  optional: Boolean!
+
+  """Optional description of the dependency."""
+  description: String
+
+  """
+  Whether this dependency is auto resolvable or not. If so we will try to automatically resolve it based on the demands specified in the dependency and the capabilities of the available agents in the system. This is used to identify the demand in the system. Attention if any of the dependencies of this agent dependency is not auto resolvable, this dependency will also not be auto resolvable
+  """
+  autoResolvable: Boolean!
+
+  """
+  Optional filter string to limit which agents can be bound to this dependency based on the app they belong to. The filter string should be in the format 'app_identifier:version' where version can be a specific version or a wildcard '*'. For example, 'my_app:*' would allow any agent belonging to 'my_app' regardless of version, while 'my_app:1.0.0' would only allow agents with that specific version.
+  """
+  appFilter: String
+
+  """
+  Optional filter string to limit which agents can be bound to this dependency based on the version of the app they belong to. The filter string should be in the format 'version' where version can be a specific version or a wildcard '*'. For example, '*' would allow any version, while '1.0.0' would only allow agents with that specific version.
+  """
+  versionFilter: String
+
+  """
+  Minimum number of viable agent instances required to resolve this dependency. This is used in combination with the auto_resolvable field to determine if a dependency can be automatically resolved. If the number of available agent instances that match the filters is less than this number, the dependency will not be considered auto resolvable.
+  """
+  minViableInstances: Int
+
+  """
+  Maximum number of viable agent instances that can be bound to this dependency. This is used in combination with the auto_resolvable field to determine if a dependency can be automatically resolved. If the number of available agent instances that match the filters is greater than this number, the dependency will not be considered auto resolvable.
+  """
+  maxViableInstances: Int
+
+  """List of action demands specified in this dependency."""
+  singular: Boolean!
+
+  """List of action demands"""
+  actionDemands: [ActionDemand!]!
+
+  """List of state demands"""
+  stateDemands: [StateDemand!]!
+}
+
+input BlokDependencyFilter {
+  AND: BlokDependencyFilter
+  OR: BlokDependencyFilter
+  NOT: BlokDependencyFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+}
+
+"""Which locks does the agent provide in general"""
+input BlokImplementationInput {
+  key: String!
+
+  """The dependencies required by this Blok."""
+  dependencies: [AgentDependencyInput!]! = []
+  components: [ComponentNodeInput!]!
+  catalog: String = null
+  description: String = null
+  demoState: JSONSerializable = null
+}
+
+"""The input for bouncing an agent."""
+input BounceInput {
+  agent: ID!
+}
+
+"""The (client, user, organization) identity that requests work."""
+type Caller {
+  """Unique identifier for the caller."""
+  id: ID!
+
+  """The associated client."""
+  client: Client!
+
+  """The associated user."""
+  user: User!
+
+  """The organization this caller belongs to."""
+  organization: Organization!
+}
+
+"""The input for canceling an assignation."""
+input CancelInput {
+  assignation: ID!
+}
+
+type ChildAssignationEvent {
+  create: Assignation
+  update: Assignation
+}
+
+type Choice {
+  label: String!
+  value: String!
+  image: String
+  description: String
 }
 
 type ChoiceAssignWidget implements AssignWidget {
@@ -34,81 +1052,12 @@ type ChoiceAssignWidget implements AssignWidget {
   choices: [Choice!]
 }
 
-type Choice {
+"\nA choice is a value that can be selected in a dropdown.\n\nIt is composed of a value, a label, and a description. The value is the\nvalue that is returned when the choice is selected. The label is the\ntext that is displayed in the dropdown. The description is the text\nthat is displayed when the user hovers over the choice.\n\n    "
+input ChoiceInput {
+  value: AnyDefault!
   label: String!
-  value: String!
-  description: String
-}
-
-type SearchAssignWidget implements AssignWidget {
-  kind: AssignWidgetKind!
-  followValue: String
-  query: String!
-  ward: String!
-  filters: [ChildPort!]
-}
-
-type ChildPort {
-  key: String!
-  label: String
-  scope: PortScope!
-  kind: PortKind!
-  description: String
-  identifier: Identifier
-  nullable: Boolean!
-  default: AnyDefault
-  children: [ChildPort!]
-  assignWidget: AssignWidget
-  returnWidget: ReturnWidget
-}
-
-enum PortScope {
-  GLOBAL
-  LOCAL
-}
-
-enum PortKind {
-  INT
-  STRING
-  STRUCTURE
-  LIST
-  BOOL
-  DICT
-  FLOAT
-  DATE
-  UNION
-  MODEL
-}
-
-"""
-The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
-"""
-scalar Identifier
-
-"""
-The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
-"""
-scalar AnyDefault
-
-interface ReturnWidget {
-  kind: ReturnWidgetKind!
-}
-
-enum ReturnWidgetKind {
-  CHOICE
-  CUSTOM
-}
-
-type StateChoiceAssignWidget implements AssignWidget {
-  kind: AssignWidgetKind!
-  followValue: String
-  stateChoices: String!
-}
-
-type CustomReturnWidget implements ReturnWidget {
-  kind: ReturnWidgetKind!
-  hook: String!
-  ward: String!
+  image: String = null
+  description: String = null
 }
 
 type ChoiceReturnWidget implements ReturnWidget {
@@ -116,11 +1065,198 @@ type ChoiceReturnWidget implements ReturnWidget {
   choices: [Choice!]
 }
 
-type StringAssignWidget implements AssignWidget {
-  kind: AssignWidgetKind!
-  followValue: String
-  placeholder: String!
-  asParagraph: Boolean!
+"""Represents a registered OAuth2 client."""
+type Client {
+  """Unique ID of the client."""
+  id: ID!
+
+  """Name of the client."""
+  name: String!
+
+  """OAuth2 client ID."""
+  clientId: String!
+
+  """Release associated with the client."""
+  release: Release
+
+  """Device associated with the client."""
+  device: Device
+}
+
+"""A way to filter apps"""
+input ClientFilter {
+  interface: StrFilterLookup
+  AND: ClientFilter
+  OR: ClientFilter
+  NOT: ClientFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  hasImplementationsFor: [ActionHash!]
+  mine: Boolean
+}
+
+"""A way to order apps"""
+input ClientOrder @oneOf {
+  definedAt: Ordering
+}
+
+"""The input for collecting a shelved item in a drawer."""
+input CollectInput {
+  drawers: [ID!]!
+}
+
+"""A grouping of actions."""
+type Collection {
+  """Collection ID."""
+  id: ID!
+
+  """Name of the collection."""
+  name: String!
+
+  """Actions included in this collection."""
+  actions(filters: ActionFilter, ordering: [ActionOrder!]! = [], pagination: OffsetPaginationInput): [Action!]!
+}
+
+"""
+An abstract structural visual element inside a Blok blueprint manifest.
+"""
+type ComponentNode {
+  id: String!
+  component: String!
+  props: [ComponentProp!]
+  children: [ComponentNode!]
+}
+
+"""
+An abstract structural visual element inside a Blok blueprint manifest.
+"""
+input ComponentNodeInput {
+  id: String!
+  component: String!
+  props: [ComponentPropInput!] = null
+  children: [ComponentNodeInput!] = null
+}
+
+"""A single key-value prop configuration for a component layout node."""
+type ComponentProp {
+  key: String!
+  staticValue: JSONSerializable
+  dynamicValue: DynamicValue
+  declaresValue: String
+  agentCall: AgentCall
+  utilCall: UtilCall
+}
+
+"""A single key-value prop configuration for a component layout node."""
+input ComponentPropInput {
+  key: String!
+  staticValue: JSONSerializable = null
+  dynamicValue: DynamicValueInput = null
+  declaresValue: String = null
+  agentCall: AgentCallInput = null
+  utilCall: UtilCallInput = null
+}
+
+"""The input for creating a blok."""
+input CreateBlokInput {
+  name: String!
+  dependencies: [AgentDependencyInput!] = null
+  description: String = null
+  catalog: String = null
+  components: [ComponentNodeInput!] = null
+  demoState: Args = null
+}
+
+"""
+Input for creating a dashboard, optionally specifying its name, the bloks to include, and the owning organization.
+"""
+input CreateDashboardInput {
+  """The name of the dashboard."""
+  name: String!
+
+  """The list of blok IDs to include in the dashboard."""
+  bloks: [String!]! = []
+
+  """The organization ID to associate with the dashboard."""
+  organization: String = null
+}
+
+"""The input for creating a implementation."""
+input CreateImplementationInput {
+  implementation: ImplementationInput!
+}
+
+"""The input for creating a placement."""
+input CreatePlacementInput {
+  """
+  A specific blok that should be used to visualize the state of the placement
+  """
+  materializedBlok: ID = null
+  role: String = null
+  affineMatrix: [[Float!]!] = null
+  model: ID = null
+  agent: ID = null
+  space: String!
+}
+
+"""The input for creating a resolution."""
+input CreateResolutionInput {
+  """
+  The implementation ID of the resolution. This is used to identify the resolution in the system.
+  """
+  implementation: ID!
+  key: String!
+  name: String!
+  resolvedDependencies: [ResolvedDependencyInput!] = null
+}
+
+"""The input for creating a shortcut."""
+input CreateShortcutInput {
+  """
+  The toolbox ID to create the shortcut in. If not provided, the shortcut will be created in the default toolbox.
+  """
+  toolbox: ID = null
+  name: String!
+  description: String = null
+  action: ID!
+  args: Args!
+  allowQuick: Boolean! = false
+  useReturns: Boolean! = false
+  bindNumber: Int = null
+}
+
+"""The input for creating a space."""
+input CreateSpaceInput {
+  name: String!
+  placements: [PlacementInput!] = null
+}
+
+input CreateTestCaseInput {
+  action: ID!
+  tester: ID!
+  description: String = null
+  name: String = null
+}
+
+input CreateTestResultInput {
+  case: ID!
+  tester: ID!
+  implementation: ID!
+  passed: Boolean!
+  result: String = null
+}
+
+"""The input for creating a 3D model."""
+input CreateThreeDModelInput {
+  name: String!
+  description: String = null
+  media: MediaLike!
+}
+
+"""The input for creating a toolbox."""
+input CreateToolboxInput {
+  name: String!
+  description: String
 }
 
 type CustomAssignWidget implements AssignWidget {
@@ -131,129 +1267,2156 @@ type CustomAssignWidget implements AssignWidget {
 }
 
 type CustomEffect implements Effect {
-  dependencies: [EffectDependency!]!
   kind: EffectKind!
+  function: ValidatorFunction!
+  dependencies: [String!]!
   hook: String!
   ward: String!
 }
 
-interface Effect {
-  dependencies: [EffectDependency!]!
-  kind: EffectKind!
+type CustomReturnWidget implements ReturnWidget {
+  kind: ReturnWidgetKind!
+  hook: String!
+  ward: String!
 }
 
-type EffectDependency {
-  condition: LogicalCondition!
+type Dashboard {
+  id: ID!
+  name: String
+  placements(filters: DashboardPlacementFilter, ordering: [DashboardPlacementOrder!]! = [], pagination: OffsetPaginationInput): [DashboardPlacement!]!
+}
+
+"""A placement of an agent in a space."""
+type DashboardPlacement {
+  id: ID!
+  dashboard: Dashboard!
+  blok: MaterializedBlok
+}
+
+"""A way to filter placements (space memberships)"""
+input DashboardPlacementFilter {
+  AND: DashboardPlacementFilter
+  OR: DashboardPlacementFilter
+  NOT: DashboardPlacementFilter
+  DISTINCT: Boolean
+
+  """Filter by IDs"""
+  ids: [ID!]
+
+  """Filter by space"""
+  space: ID
+
+  """Filter by agent"""
+  agent: ID
+
+  """Search by name"""
+  search: String
+}
+
+input DashboardPlacementOrder @oneOf {
+  role: Ordering
+  createdAt: Ordering
+}
+
+"""Date with time (isoformat)"""
+scalar DateTime
+
+"A definition\n\n    Definitions are the building implementation for Actions and provide the\n    information needed to create a action. They are primarly composed of a name,\n    a description, and a list of ports.\n\n    Definitions provide a protocol of input and output, and do not contain\n    any information about the actual implementation of the action ( this is handled\n    by a implementation that implements a action).\n\n    "
+input DefinitionInput {
+  """
+  The description of the definition. This is the text that is displayed in the UI
+  """
+  description: String = null
+
+  """
+  The collections of the definition. This is used to group definitions together in the UI
+  """
+  collections: [String!]! = []
+
+  """
+  The key of the definition. This is used to uniquely identify the definition
+  """
+  key: String!
+
+  """
+  The package of the function. Will default to the currents agent's app if not specified. This is used to group definitions together in the UI and provide a better user experience
+  """
+  package: String = null
+
+  """
+  The version of the definition. This is used to differentiate if the underyling algorithm has changed, i.e we would expect different results for the same input
+  """
+  version: String!
+
+  """
+  The name of the actions. This is used to uniquely identify the definition
+  """
+  name: String!
+
+  """
+  Whether the definition is stateful or not. If the definition is stateful, it can be used to create a stateful action. If the definition is not stateful, it cannot be used to create a stateful action
+  """
+  stateful: Boolean! = false
+
+  """
+  The port groups of the definition. This is used to group ports together in the UI
+  """
+  portGroups: [PortGroupInput!]! = []
+
+  """The args of the definition. This is the input ports of the definition"""
+  args: [ArgPortInput!]! = []
+
+  """
+  The returns of the definition. This is the output ports of the definition
+  """
+  returns: [ReturnPortInput!]! = []
+  tests: ActionDependencyInput = null
+
+  """
+  The kind of the definition. This is the type of the definition. Can be either a function or a generator
+  """
+  kind: ActionKind!
+
+  """
+  The tests for the definition. This is used to group definitions together in the UI
+  """
+  isTestFor: [String!]! = []
+
+  """
+  The interfaces of the definition. This is used to group definitions together in the UI
+  """
+  interfaces: [String!]! = []
+
+  """
+  Whether the definition is a dev definition or not. If the definition is a dev definition, it can be used to create a dev action. If the definition is not a dev definition, it cannot be used to create a dev action
+  """
+  isDev: Boolean! = false
+
+  """The logo of the definition. This is used to display the logo in the UI"""
+  logo: String = null
+}
+
+input DeleteAgentInput {
+  """
+  The ID of the agent to delete. This is used to identify the agent in the system.
+  """
+  id: ID!
+}
+
+"""The input for updating a blok."""
+input DeleteBlokInput {
+  """
+  The blok ID to delete. This is used to identify the blok in the system.
+  """
+  id: ID!
+}
+
+"""
+Input for deleting a dashboard. This is used to delete a dashboard by its ID.
+"""
+input DeleteDashboardInput {
+  """The ID of the dashboard to delete."""
+  id: ID!
+}
+
+"""The input for deleting a implementation."""
+input DeleteImplementationInput {
+  implementation: ID!
+}
+
+"""
+Input for updating a dashboard. This is used to update the properties of a dashboard, such as its name, associated bloks, or organization.
+"""
+input DeleteMaterializedBlokInput {
+  """The ID of the materialized blok to delete."""
+  id: ID!
+}
+
+"""The input for deleting a placement."""
+input DeletePlacementInput {
+  id: ID!
+}
+
+"""The input for deleting a resolution."""
+input DeleteResolutionInput {
+  id: ID!
+}
+
+"""The input for deleting a shortcut."""
+input DeleteShortcutInput {
+  id: ID!
+}
+
+"""The input for deleting a space."""
+input DeleteSpaceInput {
+  id: ID!
+}
+
+"""The input for deleting a 3D model."""
+input DeleteThreeDModelInput {
+  id: ID!
+}
+
+enum DemandKind {
+  ARGS
+  RETURNS
+}
+
+"""Represents a dependency between implementations and actions."""
+type Dependency {
+  """Unique ID of the dependency."""
+  id: ID!
+
+  """The implementation this dependency belongs to."""
+  implementation: Implementation!
+
+  """Optional string identifier or tag for reference."""
+  key: String!
+
+  """Indicates if the dependency is optional."""
+  optional: Boolean!
+
+  """Optional description of the dependency."""
+  description: String
+
+  """
+  Whether this dependency is auto resolvable or not. If so we will try to automatically resolve it based on the demands specified in the dependency and the capabilities of the available agents in the system. This is used to identify the demand in the system. Attention if any of the dependencies of this agent dependency is not auto resolvable, this dependency will also not be auto resolvable
+  """
+  autoResolvable: Boolean!
+
+  """
+  Optional filter string to limit which agents can be bound to this dependency based on the app they belong to. The filter string should be in the format 'app_identifier:version' where version can be a specific version or a wildcard '*'. For example, 'my_app:*' would allow any agent belonging to 'my_app' regardless of version, while 'my_app:1.0.0' would only allow agents with that specific version.
+  """
+  appFilter: String
+
+  """
+  Optional filter string to limit which agents can be bound to this dependency based on the version of the app they belong to. The filter string should be in the format 'version' where version can be a specific version or a wildcard '*'. For example, '*' would allow any version, while '1.0.0' would only allow agents with that specific version.
+  """
+  versionFilter: String
+
+  """
+  Minimum number of viable agent instances required to resolve this dependency. This is used in combination with the auto_resolvable field to determine if a dependency can be automatically resolved. If the number of available agent instances that match the filters is less than this number, the dependency will not be considered auto resolvable.
+  """
+  minViableInstances: Int
+
+  """
+  Maximum number of viable agent instances that can be bound to this dependency. This is used in combination with the auto_resolvable field to determine if a dependency can be automatically resolved. If the number of available agent instances that match the filters is greater than this number, the dependency will not be considered auto resolvable.
+  """
+  maxViableInstances: Int
+
+  """List of action demands specified in this dependency."""
+  singular: Boolean!
+
+  """List of action demands"""
+  actionDemands: [ActionDemand!]!
+
+  """List of state demands"""
+  stateDemands: [StateDemand!]!
+}
+
+input DependencyFilter {
+  AND: DependencyFilter
+  OR: DependencyFilter
+  NOT: DependencyFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+}
+
+"""Represents a device assigned to users within an organization."""
+type Device {
+  """Unique ID of the device."""
+  id: ID!
+
+  """The device identifier."""
+  deviceId: ID!
+}
+
+"""
+A bound state pointer referencing a variable inside a Blok state instance.
+"""
+type DynamicValue {
+  literal: String
+  path: String
+}
+
+"""
+A bound state pointer referencing a variable inside a Blok state instance.
+"""
+input DynamicValueInput {
+  path: String = null
+}
+
+interface Effect {
+  kind: EffectKind!
+  function: ValidatorFunction!
+  dependencies: [String!]!
+}
+
+"\n                 An effect is a way to modify a port based on a condition. For example,\n    you could have an effect that sets a port to null if another port is null.\n\n    Or, you could have an effect that hides the port if another port meets a condition.\n    E.g when the user selects a certain option in a dropdown, another port is hidden.\n\n\n    "
+input EffectInput {
+  function: ValidatorFunction!
+  dependencies: [String!] = []
+  message: String = null
+  kind: EffectKind!
+  fade: Boolean = true
+  hook: String = null
+  ward: String = null
+}
+
+"""The kind of effect."""
+enum EffectKind {
+  MESSAGE
+  HIDE
+  CUSTOM
+}
+
+"""Represents a file-based drawer within a filesystem shelve."""
+type FileDrawer {
+  """ID of the file drawer."""
+  id: ID!
+
+  """External resource identifier."""
+  resourceId: String!
+
+  """Agent owning the drawer."""
+  agent: Agent!
+
+  """Unique string identifying the drawer."""
+  identifier: String!
+
+  """Creation timestamp of the drawer."""
+  createdAt: DateTime!
+}
+
+"""A way to filter shelved items"""
+input FileDrawerFilter {
+  shelve: ID
+  agent: ID
+  identifier: String
+  AND: FileDrawerFilter
+  OR: FileDrawerFilter
+  NOT: FileDrawerFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+}
+
+"""Shelve on an agent for filesystem-based resources."""
+type FilesystemShelve {
+  """ID of the filesystem shelve."""
+  id: ID!
+
+  """List of file drawers in the shelve."""
+  drawers(filters: FileDrawerFilter, pagination: OffsetPaginationInput): [FileDrawer!]!
+}
+
+"""A way to filter shelved items"""
+input FilesystemShelveFilter {
+  AND: FilesystemShelveFilter
+  OR: FilesystemShelveFilter
+  NOT: FilesystemShelveFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+}
+
+input FinishMediaUploadInput {
+  storeId: String!
+  valid: Boolean! = true
+}
+
+enum Granularity {
+  HOUR
+  DAY
+  WEEK
+  MONTH
+  QUARTER
+  YEAR
+}
+
+"""Represents a record of an agent's hardware configuration."""
+type HardwareRecord {
+  """Unique ID of the hardware record."""
+  id: ID!
+
+  """Number of CPU cores available."""
+  cpuCount: Int!
+
+  """Vendor of the CPU."""
+  cpuVendorName: String!
+
+  """Clock speed of the CPU in GHz."""
+  cpuFrequency: Float!
+
+  """Timestamp when this record was created."""
+  createdAt: DateTime!
+
+  """The agent to which this hardware belongs."""
+  agent: Agent!
+}
+
+input HardwareRecordFilter {
+  AND: HardwareRecordFilter
+  OR: HardwareRecordFilter
+  NOT: HardwareRecordFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  cpuVendorName: String
+}
+
+type HideEffect implements Effect {
+  kind: EffectKind!
+  function: ValidatorFunction!
+  dependencies: [String!]!
+  fade: Boolean!
+}
+
+"""
+A hook is a function that is called when a action has reached a specific lifecycle point. Hooks are jsut actions that take an assignation as input and return a value.
+"""
+input HookInput {
+  kind: HookKind!
+  hash: ActionHash!
+}
+
+enum HookKind {
+  CLEANUP
+  INIT
+}
+
+"""
+The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
+"""
+scalar Identifier
+
+"""
+Implement an agent with the given implementations, states and locks. This will create the agent if it doesn't exist and update it if it does exist.
+"""
+input ImplementAgentInput {
+  name: String = null
+  states: [StateImplementationInput!] = null
+  implementations: [ImplementationInput!] = null
+  locks: [LockImplementationInput!] = null
+  bloks: [BlokImplementationInput!] = null
+  hash: String = null
+}
+
+"""Represents a concrete implementation of an action."""
+type Implementation {
+  """Unique ID of the implementation."""
+  id: ID!
+
+  """Interface string representing the implementation entrypoint."""
+  interface: String!
+
+  """Agent running this implementation."""
+  agent: Agent!
+
+  """The action this implements."""
+  action: Action!
+
+  """Arbitrary parameters for the implementation."""
+  params: AnyDefault!
+
+  """The resolved dependencies"""
+  resolutions(filters: ResolutionFilter, pagination: OffsetPaginationInput): [Resolution!]!
+
+  """Dependencies required by this action."""
+  dependencies(filters: DependencyFilter, pagination: OffsetPaginationInput): [Dependency!]!
+
+  """States that this implementation manipulates."""
+  manipulates: [State!]!
+
+  """
+  If this is a higher-order (wrapper) implementation, the lower implementation it wraps.
+  """
+  higherOrderFor: Implementation
+
+  """The higher-order implementations that wrap this implementation."""
+  lowerOrderImplementations(filters: ImplementationFilter, ordering: [ImplementationOrder!]! = [], pagination: OffsetPaginationInput): [Implementation!]!
+
+  """
+  Projection config (bound params, arg/dependency/return maps) when this is a higher-order implementation.
+  """
+  higherOrderConfig: AnyDefault!
+
+  """
+  Whether a signed provenance token is minted when this implementation is assigned.
+  """
+  needsToken: Boolean!
+
+  """
+  Declared audience for the provenance token's `aud`, or null to derive it at dispatch.
+  """
+  provenanceAudience: [String!]
+
+  """Constructed name for display, combining interface and agent name."""
+  name: String!
+
+  """Check if this implementation is pinned by the current user."""
+  pinned: Boolean!
+
+  """Tests"""
+  tests: [Implementation!]!
+
+  """List of action demands"""
+  tracks: [Track!]!
+
+  """Get the latest completed assignation created by the current user."""
+  myLatestAssignation: Assignation
+}
+
+input ImplementationActionFilter {
+  AND: ImplementationActionFilter
+  OR: ImplementationActionFilter
+  NOT: ImplementationActionFilter
+  DISTINCT: Boolean
+  search: String
+  name: String
+  ids: [ID!]
+  demands: [PortDemandInput!]
+  kind: ActionKind
+  protocols: [String!]
+}
+
+input ImplementationAgentFilter {
+  AND: ImplementationAgentFilter
+  OR: ImplementationAgentFilter
+  NOT: ImplementationAgentFilter
+  DISTINCT: Boolean
+  clientId: String
+  ids: [ID!]
+  hasImplementations: [String!]
+  hasStates: [String!]
+}
+
+input ImplementationFilter {
+  interface: StrFilterLookup
+  action: ImplementationActionFilter
+  agent: ImplementationAgentFilter
+  AND: ImplementationFilter
+  OR: ImplementationFilter
+  NOT: ImplementationFilter
+  DISTINCT: Boolean
+  active: Boolean
+  ids: [ID!]
+  actionHash: ActionHash
+  parameters: [ParamPair!]
+  resolvableFor: ID
+  search: String
+  actionDemand: ActionDemandInput
+}
+
+"""
+A implementation is a blueprint for a action. It is composed of a definition, a list of dependencies, and a list of params.
+"""
+input ImplementationInput {
+  """
+  The optimistics of the definition. This is used to optimistically set state values when the action is assigned. This is used to provide a better user experience by optimistically setting state
+  """
+  optimistics: [OptimisticInput!] = null
+  definition: DefinitionInput!
+  dependencies: [AgentDependencyInput!]! = []
+  tracks: [TrackInput!] = null
+  interface: String
+  params: AnyDefault = null
+  dynamic: Boolean! = false
+  logo: String = null
+  locks: [String!] = null
+  manipulates: [String!] = null
+  needsToken: Boolean! = true
+  provenanceAudience: [String!] = null
+}
+
+type ImplementationMapping {
+  """Get the key of the implementation mapping."""
+  key: String!
+
+  """Get the key of the implementation mapping."""
+  implementation: Implementation!
+
+  """Get the key of the implementation mapping."""
+  resolvedDependencies: [ResolvedAgentDependency!]!
+}
+
+input ImplementationOrder @oneOf {
+  createdAt: Ordering
+  startedAt: Ordering
+  finishedAt: Ordering
+  status: Ordering
+  active: Ordering
+}
+
+type ImplementationUpdate {
+  create: Implementation!
+  update: Implementation!
+  delete: ID!
+}
+
+"""Usage of an input interface in an action."""
+type InputInterfaceUsage {
+  id: ID!
+  interface: Interface!
+  action: Action!
+  portIndex: Int!
+  portKey: String!
+  modifiers: [String!]!
+}
+
+input InputInterfaceUsageFilter {
+  AND: InputInterfaceUsageFilter
+  OR: InputInterfaceUsageFilter
+  NOT: InputInterfaceUsageFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  interface: ID
+}
+
+"""Usage of an input structure in an action."""
+type InputStructureUsage {
+  id: ID!
+  structure: Structure!
+  action: Action!
+  portIndex: Int!
+  portKey: String!
+  modifiers: [String!]!
+}
+
+input InputStructureUsageFilter {
+  AND: InputStructureUsageFilter
+  OR: InputStructureUsageFilter
+  NOT: InputStructureUsageFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  structure: ID
+}
+
+"""If this structure is the default in its package."""
+type Interface {
+  id: ID!
+  key: String!
+  description: String
+  package: StructurePackage!
+
+  """Implementations that implement this interface."""
+  implementations(filters: ImplementationFilter, ordering: [ImplementationOrder!]! = [], pagination: OffsetPaginationInput): [Implementation!]!
+
+  """Usages of this interface as an output in actions."""
+  outputUsages(filters: OutputInterfaceUsageFilter, pagination: OffsetPaginationInput): [OutputInterfaceUsage!]!
+
+  """Usages of this interface as an input in actions."""
+  inputUsages(filters: InputInterfaceUsageFilter, pagination: OffsetPaginationInput): [InputInterfaceUsage!]!
+}
+
+input InterfaceFilter {
+  AND: InterfaceFilter
+  OR: InterfaceFilter
+  NOT: InterfaceFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  search: String
+}
+
+"""The input for interrupting an assignation."""
+input InterruptInput {
+  assignation: ID!
+}
+
+"""
+The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).
+"""
+scalar JSON @specifiedBy(url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf")
+
+type JSONPatch {
+  op: JSONPatchOperation!
+  path: String!
+  value: Args!
+}
+
+enum JSONPatchOperation {
+  add
+  remove
+  replace
+  move
+  copy
+  test
+}
+
+"""
+The `JSONSerializable` scalar type represents a JSON-serializable value.
+"""
+scalar JSONSerializable
+
+"""The input for bouncing an agent."""
+input KickInput {
+  agent: ID!
+  reason: String = null
+}
+
+"""Which locks does the agent provide in general"""
+input LockDefinitionInput {
+  key: String!
+  description: String = null
+}
+
+"""Which locks does the agent provide in general"""
+input LockImplementationInput {
+  key: String!
+  definition: LockDefinitionInput!
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  ERROR
+  WARN
+  CRITICAL
+}
+
+"""The input for logging state patches."""
+input LogPatchesInput {
+  patches: [PatchInput!]!
+}
+
+"""The input for logging state snapshots."""
+input LogSnapshotInput {
+  value: AnyDefault!
+}
+
+"""The input for mapping actions to implementations in a agent."""
+input MappedAgentInput {
+  key: String!
+  agent: ID!
+}
+
+"""The input for creating a blok."""
+input MaterializeBlokInput {
+  blok: ID!
+
+  """
+  The dashboard ID to materialize the blok in. If not provided, the blok will be materialized in the default dashboard.
+  """
+  dashboard: ID = null
+
+  """
+  The agent mappings for the blok. This is used to map the blok dependencies to agents in the system.
+  """
+  agentMappings: [BlokAgentMappingInput!] = null
+}
+
+"""
+A materialized instance of a Blok that can be placed on dashboards and linked to agent states.
+"""
+type MaterializedBlok {
+  id: ID!
+  blok: Blok!
+  name: String
+  description: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """Mappings of states to this materialized blok."""
+  agentMappings: [BlokAgentMapping!]!
+
+  """Placements of this materialized blok on dashboards."""
+  dashboardPlacements(filters: DashboardPlacementFilter, ordering: [DashboardPlacementOrder!]! = [], pagination: OffsetPaginationInput): [DashboardPlacement!]!
+
+  """Placements of this materialized blok."""
+  placements(filters: PlacementFilter, ordering: [PlacementOrder!]! = [], pagination: OffsetPaginationInput): [Placement!]!
+}
+
+"""A way to filter placements (space memberships)"""
+input MaterializedBlokFilter {
+  AND: MaterializedBlokFilter
+  OR: MaterializedBlokFilter
+  NOT: MaterializedBlokFilter
+  DISTINCT: Boolean
+
+  """Filter by IDs"""
+  ids: [ID!]
+
+  """Filter by agent"""
+  agent: ID
+
+  """Search by name"""
+  search: String
+}
+
+input MaterializedBlokOrder @oneOf {
+  createdAt: Ordering
+}
+
+"""Temporary S3 credentials for reading a media object."""
+type MediaAccessGrant {
+  status: String!
+  accessKey: String!
+  secretKey: String!
+  sessionToken: String!
+  region: String!
+  bucket: String!
+  key: String!
+  path: String!
+  expiresIn: Int!
+  store: String
+}
+
+"""
+A type representing a media store reference, which can be either a string ID or a more complex object.
+"""
+scalar MediaLike
+
+type MediaStore @key(fields: "id", resolvable: true) {
+  id: ID!
+  path: String!
+  bucket: String!
+  key: String!
+  originalFileName: String
+  contentType: String
+
+  """Get temporary S3 read credentials for the media object."""
+  accessGrant(host: String = null): MediaAccessGrant!
+
+  """Compatibility field returning the canonical S3 object path."""
+  presignedUrl(host: String = null): String!
+}
+
+"""A presigned PUT grant for uploading a media object."""
+type MediaUploadGrant {
+  status: String!
+  accessKey: String!
+  secretKey: String!
+  sessionToken: String!
+  region: String!
+  bucket: String!
+  key: String!
+  path: String!
+  expiresIn: Int!
+  store: String!
+  maxBytes: Int!
+  originalFileName: String
+  uploadFileName: String!
+  uploadContentType: String
+  uploadFormField: String!
+}
+
+type MemoryDrawer {
+  id: ID!
+  resourceId: String!
+  shelve: MemoryShelve!
+  identifier: String!
+  description: String
+  createdAt: DateTime!
+
+  """Get the latest value stored in this drawer."""
+  label: String!
+}
+
+"""A way to filter shelved items"""
+input MemoryDrawerFilter {
+  shelve: ID
+  agent: ID
+  AND: MemoryDrawerFilter
+  OR: MemoryDrawerFilter
+  NOT: MemoryDrawerFilter
+  DISTINCT: Boolean
+  implementation: ID
+  identifier: String
+  ids: [ID!]
+  search: String
+}
+
+"""A shelve for storing memory-based resources on an agent."""
+type MemoryShelve {
+  """ID of the memory shelve."""
+  id: ID!
+
+  """Agent that owns this memory shelve."""
+  agent: Agent!
+
+  """Name of the shelve."""
+  name: String!
+
+  """Optional description of the shelve."""
+  description: String
+
+  """List of memory drawers within the shelve."""
+  drawers(filters: MemoryDrawerFilter, pagination: OffsetPaginationInput): [MemoryDrawer!]!
+}
+
+"""A way to filter shelved items"""
+input MemoryShelveFilter {
+  agent: ID
+  AND: MemoryShelveFilter
+  OR: MemoryShelveFilter
+  NOT: MemoryShelveFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+}
+
+input MemoryShelveOrder @oneOf {
+  name: Ordering
+}
+
+type MessageEffect implements Effect {
+  kind: EffectKind!
+  function: ValidatorFunction!
+  dependencies: [String!]!
+  message: String!
+}
+
+"""Root mutation type for executing write operations on the API."""
+type Mutation {
+  """Create a new implementation entry."""
+  createImplementation(input: CreateImplementationInput!): Implementation! @auth(required_scopes: null, required_roles: null)
+
+  """Acknowledge an assignation."""
+  ack(input: AckInput!): Assignation! @auth(required_scopes: null, required_roles: null)
+
+  """Bounce an agent so it reconnects."""
+  bounce(input: BounceInput!): Agent! @auth(required_scopes: null, required_roles: null)
+
+  """Kick an agent to force disconnect. It will fail and not reconnect."""
+  kick(input: KickInput!): Agent! @auth(required_scopes: null, required_roles: null)
+
+  """Assign a task to an agent."""
+  assign(input: AssignInput!): Assignation! @auth(required_scopes: null, required_roles: null)
+
+  """Cancel an active assignation."""
+  cancel(input: CancelInput!): Assignation! @auth(required_scopes: null, required_roles: null)
+
+  """Advance an assignation one step."""
+  step(input: StepInput!): Assignation! @auth(required_scopes: null, required_roles: null)
+
+  """Pause an ongoing assignation."""
+  pause(input: PauseInput!): Assignation! @auth(required_scopes: null, required_roles: null)
+
+  """Resume a paused assignation."""
+  resume(input: ResumeInput!): Assignation! @auth(required_scopes: null, required_roles: null)
+
+  """Collect results from an assignation."""
+  collect(input: CollectInput!): [String!]! @auth(required_scopes: null, required_roles: null)
+
+  """Interrupt the execution of an assignation."""
+  interrupt(input: InterruptInput!): Assignation! @auth(required_scopes: null, required_roles: null)
+
+  """Reinitialize the assignation or agent."""
+  reinit(input: ReInitInput!): String! @auth(required_scopes: null, required_roles: null)
+
+  """Block an agent from connecting."""
+  block(input: BlockInput!): Agent! @auth(required_scopes: null, required_roles: null)
+
+  """Unblock a previously blocked agent."""
+  unblock(input: UnblockInput!): Agent! @auth(required_scopes: null, required_roles: null)
+
+  """Delete a registered implementation."""
+  deleteImplementation(input: DeleteImplementationInput!): String! @auth(required_scopes: null, required_roles: null)
+
+  """
+  Mark an implementation as a higher-order wrapper of a lower implementation, with a projection config.
+  """
+  setHigherOrder(input: SetHigherOrderInput!): Implementation! @auth(required_scopes: null, required_roles: null)
+
+  """Ensure agent record exists or is up to date."""
+  ensureAgent(input: AgentInput!): Agent! @auth(required_scopes: null, required_roles: null)
+
+  """Create a new test case."""
+  createTestCase(input: CreateTestCaseInput!): TestCase! @auth(required_scopes: null, required_roles: null)
+
+  """Create a test result record."""
+  createTestResult(input: CreateTestResultInput!): TestResult! @auth(required_scopes: null, required_roles: null)
+
+  """Shelve data into a memory drawer."""
+  shelveInMemoryDrawer(input: ShelveInMemoryDrawerInput!): MemoryDrawer! @auth(required_scopes: null, required_roles: null)
+
+  """Unshelve data from a memory drawer."""
+  unshelveMemoryDrawer(input: UnshelveMemoryDrawerInput!): ID! @auth(required_scopes: null, required_roles: null)
+
+  """Create a dashboard layout."""
+  createDashboard(input: CreateDashboardInput!): Dashboard! @auth(required_scopes: null, required_roles: null)
+
+  """Create a user interface panel."""
+  createBlok(input: CreateBlokInput!): Blok! @auth(required_scopes: null, required_roles: null)
+
+  """Materialize a UI blok into a concrete instance on a dashboard."""
+  materializeBlok(input: MaterializeBlokInput!): MaterializedBlok! @auth(required_scopes: null, required_roles: null)
+
+  """Pin an agent to the user."""
+  pinAgent(input: PinInput!): Agent! @auth(required_scopes: null, required_roles: null)
+
+  """Pin an implementation to the user."""
+  pinImplementation(input: PinInput!): Implementation! @auth(required_scopes: null, required_roles: null)
+
+  """Delete an agent record."""
+  deleteAgent(input: DeleteAgentInput!): ID! @auth(required_scopes: null, required_roles: null)
+
+  """Update properties of an agent such as its name."""
+  updateAgent(input: UpdateAgentInput!): Agent! @auth(required_scopes: null, required_roles: null)
+
+  """Create a shortcut to an action."""
+  createShortcut(input: CreateShortcutInput!): Shortcut! @auth(required_scopes: null, required_roles: null)
+
+  """Delete a shortcut."""
+  deleteShortcut(input: DeleteShortcutInput!): ID! @auth(required_scopes: null, required_roles: null)
+
+  """Create a new toolbox with shortcuts."""
+  createToolbox(input: CreateToolboxInput!): Toolbox! @auth(required_scopes: null, required_roles: null)
+
+  """Delete unreferenced actions from the system."""
+  cleanupActions(actionIds: [ID!] = null): Int! @auth(required_scopes: null, required_roles: null)
+
+  """Automatically resolve dependencies for an implementation."""
+  autoResolve(input: AutoResolveInput!): Resolution! @auth(required_scopes: null, required_roles: null)
+
+  """Create sa resolution from"""
+  createResolution(input: CreateResolutionInput!): Resolution! @auth(required_scopes: null, required_roles: null)
+
+  """Update an existing resolution."""
+  updateResolution(input: UpdateResolutionInput!): Resolution! @auth(required_scopes: null, required_roles: null)
+
+  """Delete a resolution by ID."""
+  deleteResolution(input: DeleteResolutionInput!): ID! @auth(required_scopes: null, required_roles: null)
+
+  """Log state patches"""
+  logPatches(input: LogPatchesInput!): ID! @auth(required_scopes: null, required_roles: null)
+
+  """Log a state snapshot """
+  logSnapshot(input: LogSnapshotInput!): ID! @auth(required_scopes: null, required_roles: null)
+
+  """Upload media and return a URL for access"""
+  requestMediaUpload(input: RequestMediaUploadInput!): MediaUploadGrant!
+
+  """Finalize a media upload after the client has written the object"""
+  finishMediaUpload(input: FinishMediaUploadInput!): MediaStore!
+
+  """Request temporary S3 read credentials for a media file"""
+  requestMediaAccess(input: RequestMediaAccessInput!): MediaAccessGrant!
+
+  """Delete a dashboard by ID."""
+  deleteDashboard(input: DeleteDashboardInput!): Boolean! @auth(required_scopes: null, required_roles: null)
+
+  """
+  Update properties of a    dashboard such as its name, associated bloks, or organization.
+  """
+  updateDashboard(input: UpdateDashboardInput!): Dashboard! @auth(required_scopes: null, required_roles: null)
+
+  """Delete a blok by ID."""
+  deleteBlok(input: DeleteBlokInput!): Boolean! @auth(required_scopes: null, required_roles: null)
+
+  """
+  Update properties of a blok such as its name, description, components, demo state, catalog, or dependencies.
+  """
+  updateBlok(input: UpdateBlokInput!): Blok! @auth(required_scopes: null, required_roles: null)
+
+  """Delete a materialized blok by ID."""
+  deleteMaterializedBlok(input: DeleteMaterializedBlokInput!): Boolean! @auth(required_scopes: null, required_roles: null)
+
+  """Update properties of a materialized blok such as its agent mappings."""
+  updateMaterializedBlok(input: UpdateMaterializedBlokInput!): MaterializedBlok! @auth(required_scopes: null, required_roles: null)
+
+  """
+  Implement an agent with given states and implementations. This is used to set up an agent with its initial configuration and capabilities.
+  """
+  implementAgent(input: ImplementAgentInput!): Agent! @auth(required_scopes: null, required_roles: null)
+
+  """Create a new 3D model."""
+  createThreedModel(input: CreateThreeDModelInput!): ThreeDModel! @auth(required_scopes: null, required_roles: null)
+
+  """Update an existing 3D model."""
+  updateThreedModel(input: UpdateThreeDModelInput!): ThreeDModel! @auth(required_scopes: null, required_roles: null)
+
+  """Delete a 3D model."""
+  deleteThreedModel(input: DeleteThreeDModelInput!): ID! @auth(required_scopes: null, required_roles: null)
+
+  """Create a new space."""
+  createSpace(input: CreateSpaceInput!): Space! @auth(required_scopes: null, required_roles: null)
+
+  """Update an existing space."""
+  updateSpace(input: UpdateSpaceInput!): Space! @auth(required_scopes: null, required_roles: null)
+
+  """Delete a space."""
+  deleteSpace(input: DeleteSpaceInput!): ID! @auth(required_scopes: null, required_roles: null)
+
+  """Create a new placement for an agent in a space."""
+  createPlacement(input: CreatePlacementInput!): Placement! @auth(required_scopes: null, required_roles: null)
+
+  """Update an existing placement."""
+  updatePlacement(input: UpdatePlacementInput!): Placement! @auth(required_scopes: null, required_roles: null)
+
+  """Delete a placement."""
+  deletePlacement(input: DeletePlacementInput!): ID! @auth(required_scopes: null, required_roles: null)
+}
+
+input OffsetPaginationInput {
+  offset: Int! = 0
+  limit: Int
+}
+
+" An optimistic is used to optimistically set state values when the action is assigned. This is used to provide a better user experience by optimistically setting state values when the action is assigned, instead of waiting for the action to be executed and the state to be updated. This will only ever happen on the frontend.\n\n"
+input OptimisticInput {
+  state: String!
+  path: String!
+  accessor: String = null
+}
+
+enum OptionKey {
+  LABEL
+  DESCRIPTION
+  LOGO
+  VALUE
+}
+
+enum Ordering {
+  ASC
+  ASC_NULLS_FIRST
+  ASC_NULLS_LAST
+  DESC
+  DESC_NULLS_FIRST
+  DESC_NULLS_LAST
+}
+
+"""Represents an organization in the system."""
+type Organization {
+  """Slug of the organization."""
+  slug: String!
+}
+
+"""Usage of an output interface in an action."""
+type OutputInterfaceUsage {
+  id: ID!
+  interface: Interface!
+  action: Action!
+  portIndex: Int!
+  portKey: String!
+  modifiers: [String!]!
+}
+
+input OutputInterfaceUsageFilter {
+  AND: OutputInterfaceUsageFilter
+  OR: OutputInterfaceUsageFilter
+  NOT: OutputInterfaceUsageFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  interface: ID
+}
+
+"""Usage of an output structure in an action."""
+type OutputStructureUsage {
+  id: ID!
+  structure: Structure!
+  action: Action!
+  portIndex: Int!
+  portKey: String!
+  modifiers: [String!]!
+}
+
+input OutputStructureUsageFilter {
+  AND: OutputStructureUsageFilter
+  OR: OutputStructureUsageFilter
+  NOT: OutputStructureUsageFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  structure: ID
+}
+
+input ParamPair {
   key: String!
   value: String!
 }
 
-enum LogicalCondition {
-  IS
-  IS_NOT
+type Patch {
+  id: ID!
+  op: String!
+  path: String!
+  value: Args!
+  timestamp: DateTime!
+  currentRevision: Int!
+  futureRevision: Int!
+  globalCurrentRevision: Int!
+  globalFutureRevision: Int!
+  sessionId: String!
+  assignation: Assignation
+  state: State!
+  interface: String!
+  patch: JSONPatch!
+}
+
+"""The input for updating a state using JSON Patch operations."""
+input PatchInput {
+  op: String!
+  path: String!
+  value: AnyDefault!
+  stateName: String!
+  currentRev: Int!
+  futureRev: Int!
+  sessionId: String!
+  correlationId: String = null
+  globalCurrentRev: Int
+  globalFutureRev: Int
+}
+
+"""The input for pausing an assignation."""
+input PauseInput {
+  assignation: ID!
+}
+
+"""The input for pinning an model."""
+input PinInput {
+  id: ID!
+  pin: Boolean!
+}
+
+"""A placement of an agent in a space."""
+type Placement {
+  id: ID!
+  space: Space!
+  agent: Agent!
+  blok: MaterializedBlok
+  role: String!
+  affineMatrix: Args
+  model: ThreeDModel
+
+  """Get the agent associated with this placement."""
+  name: String!
+}
+
+"""A way to filter placements (space memberships)"""
+input PlacementFilter {
+  AND: PlacementFilter
+  OR: PlacementFilter
+  NOT: PlacementFilter
+  DISTINCT: Boolean
+
+  """Filter by IDs"""
+  ids: [ID!]
+
+  """Filter by space"""
+  space: ID
+
+  """Filter by agent"""
+  agent: ID
+
+  """Search by name"""
+  search: String
+}
+
+"""The input for creating or updating a placement."""
+input PlacementInput {
+  """
+  A specific blok that should be used to visualize the state of the placement
+  """
+  blok: ID = null
+  role: String = null
+  affineMatrix: [[Float!]!] = null
+  model: ID = null
+  agent: ID = null
+}
+
+input PlacementOrder @oneOf {
+  role: Ordering
+  createdAt: Ordering
+}
+
+"""The input for creating a port demand."""
+input PortDemandInput {
+  """The kind of the demand. You can ask for args or returns"""
+  kind: DemandKind!
+
+  """The matches of the demand. """
+  matches: [PortMatchInput!] = null
+
+  """
+  Require that the action has a specific number of ports. This is used to identify the demand in the system.
+  """
+  forceLength: Int = null
+
+  """
+  Require that the action has a specific number of non-nullable ports. This is used to identify the demand in the system.
+  """
+  forceNonNullableLength: Int = null
+
+  """
+  Require that the action has a specific number of structure ports. This is used to identify the demand in the system.
+  """
+  forceStructureLength: Int = null
+}
+
+type PortGroup {
+  key: String!
+  title: String
+  description: String
+  effects: [Effect!]
+  ports: [String!]!
+}
+
+"""
+A Port Group is a group of ports that are related to each other. It is used to group ports together in the UI and provide a better user experience.
+"""
+input PortGroupInput {
+  """
+  The key of the port group. This is used to uniquely identify the port group
+  """
+  key: String!
+  title: String
+  description: String
+  effects: [EffectInput!] = []
+  ports: [String!] = []
+}
+
+"""The kind of port."""
+enum PortKind {
+  INT
+  STRING
+  STRUCTURE
+  LIST
+  BOOL
+  DICT
+  FLOAT
+  DATE
+  UNION
+  ENUM
+  MODEL
+  MEMORY_STRUCTURE
+  INTERFACE
+}
+
+type PortMatch {
+  at: Int
+  key: String
+  kind: PortKind
+  identifier: String
+  children: [PortMatch!]
+  nullable: Boolean
+}
+
+"""
+A dependency for a implementation. By defining dependencies, you can
+    create a dependency graph for your implementations and actions
+"""
+input PortMatchInput {
+  """
+  The object of the port to match. This is used for adanved pattern matching based on the exact object descriptors of the object. i.e { x: 1, y: 2} 
+  """
+  object: Arg = null
+  at: Int = null
+  key: String = null
+  kind: PortKind = null
+  identifier: String = null
+  nullable: Boolean = null
+  children: [PortMatchInput!] = null
+}
+
+"""The `Args` scalar type represents a Dictionary of arguments"""
+scalar Props
+
+"""A set of related actions forming a protocol."""
+type Protocol {
+  """Protocol ID."""
+  id: ID!
+
+  """Name of the protocol."""
+  name: String!
+
+  """Associated actions."""
+  actions(filters: ActionFilter, ordering: [ActionOrder!]! = [], pagination: OffsetPaginationInput): [Action!]!
+}
+
+input ProtocolFilter {
+  name: StrFilterLookup
+  AND: ProtocolFilter
+  OR: ProtocolFilter
+  NOT: ProtocolFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  search: String
+}
+
+input ProtocolOrder @oneOf {
+  name: Ordering
+}
+
+type Provides {
+  key: String!
+  operator: ProvidesOperator!
+  value: Arg!
+}
+
+input ProvidesInput {
+  key: String!
+  operator: ProvidesOperator!
+  value: Arg!
+}
+
+"""The operator for matching descriptors."""
+enum ProvidesOperator {
+  MATCHES
+  EXISTS
+  LTE
+  GTE
+  EQUALS
+  CONTAINS
+  NOT_EQUALS
   IN
+  NOT_IN
 }
 
-enum EffectKind {
-  MESSAGE
-  CUSTOM
-}
-
-type MessageEffect implements Effect {
-  dependencies: [EffectDependency!]!
-  kind: EffectKind!
-  message: String!
-}
-
-interface UIChild {
-  kind: UIChildKind!
-}
-
-enum UIChildKind {
-  GRID
-  SPLIT
-  RESERVATION
-  STATE
-}
-
-type UIGrid implements UIChild {
-  kind: UIChildKind!
-  rowHeight: Int!
-  columns: Int!
-  children: [UIGridItem!]!
-}
-
-type UIGridItem {
-  x: Int!
-  y: Int!
-  w: Int!
-  h: Int!
-  minW: Int!
-  maxW: Int!
-  child: UIChild!
-}
-
-type UISplit implements UIChild {
-  kind: UIChildKind!
-  left: UIChild!
-  right: UIChild!
-}
-
-type UIState implements UIChild {
-  kind: UIChildKind!
-  state: String!
+type ProxyWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  targetPort: String!
+  targetAction: String!
+  targetDependency: String
 }
 
 type Query {
-  clients(filters: AppFilter, order: AppOrder, pagination: OffsetPaginationInput): [App!]!
-  hardwareRecords(filters: HardwareRecordFilter, pagination: OffsetPaginationInput): [HardwareRecord!]!
-  agents(filters: AgentFilter, order: AgentOrder, pagination: OffsetPaginationInput): [Agent!]!
-  nodes(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
-  protocols(filters: ProtocolFilter, order: ProtocolOrder, pagination: OffsetPaginationInput): [Protocol!]!
-  templates(filters: TemplateFilter, pagination: OffsetPaginationInput): [Template!]!
-  testResults(filters: TestResultFilter, pagination: OffsetPaginationInput): [TestResult!]!
-  testCases(filters: TestCaseFilter, pagination: OffsetPaginationInput): [TestCase!]!
-  reservations(instanceId: InstanceId = null): [Reservation!]!
-  myreservations(instanceId: InstanceId = null): [Reservation!]!
-  provisions(filters: ProvisionFilter, pagination: OffsetPaginationInput): [Provision!]!
-  dashboards: [Dashboard!]!
-  states: [State!]!
-  panels: [Panel!]!
-  stateSchemas: [StateSchema!]!
-  node(id: ID = null, reservation: ID = null, assignation: ID = null, template: ID = null, hash: NodeHash = null): Node!
-  assignations(instanceId: InstanceId = null): [Assignation!]!
-  event(id: ID = null): [AssignationEvent!]!
-  templateAt(agent: ID!, extension: String = null, interface: String = null, nodeHash: String = null): Template!
-  myTemplateAt(instanceId: String!, nodeId: ID = null, interface: String = null): Template!
-  stateFor(template: ID = null, agent: ID = null, stateHash: String = null): State!
-  state(id: ID!): State!
-  panel(id: ID!): Panel!
-  stateSchema(id: ID!): StateSchema!
-  hardwareRecord(id: ID!): HardwareRecord!
-  agent(id: ID!): Agent!
-  dashboard(id: ID!): Dashboard!
-  dependency(id: ID!): Dependency!
-  testCase(id: ID!): TestCase!
-  testResult(id: ID!): TestResult!
-  reservation(id: ID!): Reservation!
-  template(id: ID!): Template!
-  provision(id: ID!): Provision!
-  assignation(id: ID!): Assignation!
+  _entities(representations: [_Any!]!): [_Entity]!
+  _service: _Service!
+
+  """List all registered clients."""
+  clients(filters: ClientFilter, ordering: [ClientOrder!]! = [], pagination: OffsetPaginationInput): [Client!]! @auth(required_scopes: null, required_roles: null)
+
+  """List of all hardware records."""
+  hardwareRecords(filters: HardwareRecordFilter, pagination: OffsetPaginationInput): [HardwareRecord!]! @auth(required_scopes: null, required_roles: null)
+
+  """Retrieve all compute agents."""
+  agents(filters: AgentFilter, ordering: [AgentOrder!]! = [], pagination: OffsetPaginationInput): [Agent!]! @auth(required_scopes: null, required_roles: null)
+
+  """List of all available actions."""
+  actions(filters: ActionFilter, ordering: [ActionOrder!]! = [], pagination: OffsetPaginationInput): [Action!]! @auth(required_scopes: null, required_roles: null)
+
+  """Retrieve protocols grouping actions."""
+  protocols(filters: ProtocolFilter, ordering: [ProtocolOrder!]! = [], pagination: OffsetPaginationInput): [Protocol!]! @auth(required_scopes: null, required_roles: null)
+
+  """All registered implementations."""
+  implementations(filters: ImplementationFilter, ordering: [ImplementationOrder!]! = [], pagination: OffsetPaginationInput): [Implementation!]! @auth(required_scopes: null, required_roles: null)
+
+  """Test results associated with test cases."""
+  testResults(filters: TestResultFilter, pagination: OffsetPaginationInput): [TestResult!]! @auth(required_scopes: null, required_roles: null)
+
+  """All test cases."""
+  testCases(filters: TestCaseFilter, pagination: OffsetPaginationInput): [TestCase!]! @auth(required_scopes: null, required_roles: null)
+
+  """List of shortcuts."""
+  shortcuts(filters: ShortcutFilter, ordering: [ShortcutOrder!]! = [], pagination: OffsetPaginationInput): [Shortcut!]! @auth(required_scopes: null, required_roles: null)
+
+  """List of toolboxes containing shortcuts."""
+  toolboxes(filters: ToolboxFilter, ordering: [ToolboxOrder!]! = [], pagination: OffsetPaginationInput): [Toolbox!]! @auth(required_scopes: null, required_roles: null)
+
+  """All dashboards."""
+  dashboards: [Dashboard!]! @auth(required_scopes: null, required_roles: null)
+
+  """All states from agents."""
+  states: [State!]! @auth(required_scopes: null, required_roles: null)
+
+  """List of UI Blok."""
+  bloks: [Blok!]! @auth(required_scopes: null, required_roles: null)
+
+  """All resolutions."""
+  resolutions(filters: ResolutionFilter, pagination: OffsetPaginationInput): [Resolution!]! @auth(required_scopes: null, required_roles: null)
+
+  """List of UI Blok."""
+  materializedBloks(filters: MaterializedBlokFilter, ordering: [MaterializedBlokOrder!]! = [], pagination: OffsetPaginationInput): [MaterializedBlok!]! @auth(required_scopes: null, required_roles: null)
+
+  """Available state schemas."""
+  stateDefinitions: [StateDefinition!]! @auth(required_scopes: null, required_roles: null)
+
+  """All memory shelves."""
+  memoryShelves(filters: MemoryShelveFilter, ordering: [MemoryShelveOrder!]! = [], pagination: OffsetPaginationInput): [MemoryShelve!]! @auth(required_scopes: null, required_roles: null)
+
+  """All memory drawers."""
+  memoryDrawers(filters: MemoryDrawerFilter, pagination: OffsetPaginationInput): [MemoryDrawer!]! @auth(required_scopes: null, required_roles: null)
+
+  """All registered structures."""
+  structures(filters: StructureFilter, pagination: OffsetPaginationInput): [Structure!]! @auth(required_scopes: null, required_roles: null)
+
+  """All registered structure packages."""
+  structurePackages(filters: StructurePackageFilter, pagination: OffsetPaginationInput): [StructurePackage!]! @auth(required_scopes: null, required_roles: null)
+
+  """All registered interfaces."""
+  interfaces(filters: InterfaceFilter, pagination: OffsetPaginationInput): [Interface!]! @auth(required_scopes: null, required_roles: null)
+
+  """All tasks."""
+  tasks(filters: AssignationFilter, ordering: [AssignationOrder!]! = [], pagination: OffsetPaginationInput): [Assignation!]! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a specific agent by ID or by app, version and device_id."""
+  agent(id: ID = null, app: String = null, version: String = null, deviceId: String = null): Agent! @auth(required_scopes: null, required_roles: null)
+
+  """List all spaces."""
+  spaces(filters: SpaceFilter, ordering: [SpaceOrder!]! = [], pagination: OffsetPaginationInput): [Space!]! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a specific space by ID."""
+  space(id: ID!): Space! @auth(required_scopes: null, required_roles: null)
+
+  """List all placements."""
+  placements(filters: PlacementFilter, ordering: [PlacementOrder!]! = [], pagination: OffsetPaginationInput): [Placement!]! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a specific placement by ID."""
+  placement(id: ID!): Placement! @auth(required_scopes: null, required_roles: null)
+
+  """List all 3D models."""
+  threedModels(filters: ThreeDModelFilter, ordering: [ThreeDModelOrder!]! = [], pagination: OffsetPaginationInput): [ThreeDModel!]! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a specific 3D model by ID."""
+  threedModel(id: ID!): ThreeDModel! @auth(required_scopes: null, required_roles: null)
+
+  """List all sessions."""
+  sessions(filters: SessionFilter, ordering: [SessionOrder!]! = [], pagination: OffsetPaginationInput): [Session!]! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a specific session by ID."""
+  session(id: ID!): Session! @auth(required_scopes: null, required_roles: null)
+
+  """Statistics about actions and their implementations."""
+  actionStats(filters: ActionFilter = null): ActionStats! @auth(required_scopes: null, required_roles: null)
+
+  """Statistics about assignations and their states."""
+  assignationStats(filters: AssignationFilter = null): AssignationStats! @auth(required_scopes: null, required_roles: null)
+
+  """Get task boundaries."""
+  taskBoundaries(correlationId: String!, stateId: ID = null): TaskBoundary @auth(required_scopes: null, required_roles: null)
+
+  """Get session boundaries."""
+  sessionBoundaries(sessionId: ID!, stateId: ID = null): SessionBoundary @auth(required_scopes: null, required_roles: null)
+
+  """Get state at global revision."""
+  stateAtGlobalRev(globalRevision: Int!, stateId: ID = null, sessionId: String = null): [Snapshot!]! @auth(required_scopes: null, required_roles: null)
+
+  """Get state at local revision."""
+  stateAtLocalRev(revision: Int!, stateId: ID = null, sessionId: String = null): [Snapshot!]! @auth(required_scopes: null, required_roles: null)
+
+  """Get forward events after revision."""
+  forwardEventsAfterRev(globalRevision: Int!, stateId: ID = null, sessionId: String = null, count: Int! = 100): [Patch!]! @auth(required_scopes: null, required_roles: null)
+
+  """Get patch events between global revisions."""
+  patchEventsBetweenGlobalRevs(fromGlobalRevision: Int!, toGlobalRevision: Int!, stateIds: [ID!] = null, sessionId: String = null): [Patch!]! @auth(required_scopes: null, required_roles: null)
+
+  """Get snapshots around revision."""
+  snapshotsAroundRev(revision: Int!, stateId: ID = null, sessionId: String = null, before: Int! = 1, after: Int! = 1): [Snapshot!]! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a specific action."""
+  action(id: ID = null, assignation: ID = null, implementation: ID = null, agent: ID = null, interface: String = null, hash: ActionHash = null, matching: ActionDependencyInput = null): Action! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch assignations."""
+  assignations: [Assignation!]! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a specific event."""
+  event(id: ID = null): [AssignationEvent!]! @auth(required_scopes: null, required_roles: null)
+
+  """Find implementation at given interface."""
+  implementationAt(agent: ID!, interface: String = null, actionHash: String = null, demand: ActionDemandInput = null): Implementation! @auth(required_scopes: null, required_roles: null)
+
+  """Find your implementation at a specific interface."""
+  myImplementationAt(actionId: ID = null, interface: String = null): Implementation! @auth(required_scopes: null, required_roles: null)
+
+  """Materialize the latest state for a specific agent"""
+  checkout(state: ID!, sessionId: ID = null, globalRevision: Int = null, timestamp: DateTime = null, forwardPatchCount: Int! = 0, backwardPatchCount: Int! = 0): StateValue! @auth(required_scopes: null, required_roles: null)
+
+  """Materialize the latest states for a specific agent"""
+  checkoutAgent(agent: ID!, sessionId: ID = null, globalRevision: Int = null, timestamp: DateTime = null, forwardPatchCount: Int! = 0, backwardPatchCount: Int! = 0): AgentWithValues! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch resolved dependencies for a resolution."""
+  resolvedImplementations(resolution: ID!, dependencyKey: String = null, methodKey: String = null): [Implementation!]! @auth(required_scopes: null, required_roles: null)
+
+  """Retrieve state for a specific context."""
+  stateFor(agent: ID!, stateHash: String = null, demand: SchemaDemandInput = null): State! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a client by ID."""
+  resolution(id: ID!): Resolution! @auth(required_scopes: null, required_roles: null)
+
+  """Get a specific state by ID."""
+  state(id: ID!): State! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a client by ID."""
+  structurePackage(id: ID!): StructurePackage! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch an interface by ID."""
+  interface(id: ID!): Interface! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a structure by ID."""
+  structure(id: ID!): Structure! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a memory shelve by ID."""
+  memoryShelve(id: ID!): MemoryShelve! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a memory drawer by ID."""
+  memoryDrawer(id: ID!): MemoryDrawer! @auth(required_scopes: null, required_roles: null)
+
+  """Get a blok by ID."""
+  blok(id: ID!): Blok! @auth(required_scopes: null, required_roles: null)
+
+  """Get a materialized blok by ID."""
+  materializedBlok(id: ID!): MaterializedBlok! @auth(required_scopes: null, required_roles: null)
+
+  """Retrieve a state definition by ID."""
+  stateDefinition(id: ID!): StateDefinition! @auth(required_scopes: null, required_roles: null)
+
+  """Get toolbox by ID."""
+  toolbox(id: ID!): Toolbox! @auth(required_scopes: null, required_roles: null)
+
+  """Retrieve shortcut by ID."""
+  shortcut(id: ID!): Shortcut! @auth(required_scopes: null, required_roles: null)
+
+  """Get hardware record by ID."""
+  hardwareRecord(id: ID!): HardwareRecord! @auth(required_scopes: null, required_roles: null)
+
+  """Get dashboard by ID."""
+  dashboard(id: ID!): Dashboard! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch a dependency by ID."""
+  dependency(id: ID!): Dependency! @auth(required_scopes: null, required_roles: null)
+
+  """Retrieve test case by ID."""
+  testCase(id: ID!): TestCase! @auth(required_scopes: null, required_roles: null)
+
+  """Get test result by ID."""
+  testResult(id: ID!): TestResult! @auth(required_scopes: null, required_roles: null)
+
+  """Get implementation by ID."""
+  implementation(id: ID!): Implementation! @auth(required_scopes: null, required_roles: null)
+
+  """Fetch assignation by ID."""
+  assignation(id: ID!): Assignation! @auth(required_scopes: null, required_roles: null)
 }
 
-type App {
+input ReInitInput {
+  agent: ID = null
+}
+
+"""Profile information for a user."""
+type Release {
+  """Unique ID of the release."""
+  id: ID!
+
+  """The app this release belongs to."""
+  app: App!
+
+  """Version string of the release."""
+  version: String!
+}
+
+input RequestMediaAccessInput {
+  storeId: String!
+}
+
+input RequestMediaUploadInput {
+  originalFileName: String!
+  fileSize: Int = null
+  contentType: String = null
+}
+
+type Requires {
+  key: String!
+  operator: RequiresOperator!
+  value: Arg!
+}
+
+input RequiresInput {
+  key: String!
+  operator: RequiresOperator!
+  value: Arg!
+}
+
+"""The operator for matching descriptors."""
+enum RequiresOperator {
+  MATCHES
+  EXISTS
+  LTE
+  GTE
+  EQUALS
+  CONTAINS
+  NOT_EQUALS
+  IN
+  NOT_IN
+}
+
+"""Represents a resolution for a blok."""
+type Resolution {
+  """Unique ID of the resolution."""
+  id: ID!
+
+  """Name of the resolution."""
+  name: String!
+
+  """List of resolved dependencies for this resolution."""
+  resolvedDependencies(filters: ResolvedDependencyFilter, pagination: OffsetPaginationInput): [ResolvedDependency!]!
+  implementation: Implementation!
+
+  """Timestamp when the resolution was created."""
+  resolvedAt: DateTime!
+
+  """User who created the resolution."""
+  creator: User!
+
+  """Organization that owns this resolution."""
+  organization: Organization!
+}
+
+"""A way to filter test cases"""
+input ResolutionFilter {
+  name: StrFilterLookup
+  AND: ResolutionFilter
+  OR: ResolutionFilter
+  NOT: ResolutionFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+}
+
+type ResolvedAgentDependency {
+  """Get a specific argument by key."""
+  values: String
+
+  """Get a specific argument by key."""
+  mappedAgents: [AgentMapping!]!
+
+  """Get the key of the resolved dependency."""
+  key: String!
+}
+
+"""
+Represents a dependency that has been resolved to a specific implementation.
+"""
+type ResolvedDependency {
+  """Unique ID of the resolved dependency."""
+  id: ID!
+
+  """The key of the resolved dependency."""
+  key: String!
+
+  """The resolution key associated with this resolved dependency."""
+  resolutionKey: String!
+
+  """The original dependency."""
+  dependency: Dependency!
+
+  """The implementation that resolves the dependency."""
+  implementation: Implementation!
+
+  """Resolution for streaming data down to this dependency."""
+  downStreamResolution: Resolution
+}
+
+"""A way to filter resolved dependencies"""
+input ResolvedDependencyFilter {
+  AND: ResolvedDependencyFilter
+  OR: ResolvedDependencyFilter
+  NOT: ResolvedDependencyFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+}
+
+"""The input for mapping dependencies to implementations in a agent."""
+input ResolvedDependencyInput {
+  key: String!
+  mappedAgents: [MappedAgentInput!]!
+  autoResolve: Boolean! = false
+}
+
+"""The input for resuming an assignation."""
+input ResumeInput {
+  assignation: ID!
+}
+
+type ReturnPort {
+  key: String!
+  label: String
+  kind: PortKind!
+  description: String
+  identifier: Identifier
+  nullable: Boolean!
+  effects: [Effect!]
+  default: AnyDefault
+  children: [ReturnPort!]
+  choices: [Choice!]
+  widget: ReturnWidget
+  provides: [Provides!]
+}
+
+"Port\n\n    A Port is a single input or output of a action. It is composed of a key and a kind\n    which are used to uniquely identify the port.\n\n    If the Port is a structure, we need to define a identifier and scope,\n    Identifiers uniquely identify a specific type of model for the scopes (e.g\n    all the ports that have the identifier \"@mikro/image\" are of the same type, and\n    are hence compatible with each other). Scopes are used to define in which context\n    the identifier is valid (e.g. a port with the identifier \"@mikro/image\" and the\n    scope \"local\", can only be wired to other ports that have the same identifier and\n    are running in the same app). Global ports are ports that have the scope \"global\",\n    and can be wired to any other port that has the same identifier, as there exists a\n    mechanism to resolve and retrieve the object for each app. Please check the rekuest\n    documentation for more information on how this works.\n\n\n    "
+input ReturnPortInput {
+  validators: [ValidatorInput!] = null
+  key: String!
+  label: String = null
+  kind: PortKind!
+  description: String = null
+  identifier: String = null
+  nullable: Boolean! = false
+  effects: [EffectInput!] = null
+  default: AnyDefault = null
+  choices: [ChoiceInput!] = null
+  widget: ReturnWidgetInput = null
+  provides: [ProvidesInput!] = null
+  children: [ReturnPortInput!] = null
+}
+
+interface ReturnWidget {
+  kind: ReturnWidgetKind!
+}
+
+"A Return Widget is a UI element that is used to display the value of a port.\n\n    Return Widgets get displayed both if we show the return values of an assignment,\n    but also when we inspect the given arguments of a previous run task. Their primary\n    usecase is to adequately display the value of a port, in a user readable way.\n\n    Return Widgets are often overwriten by the underlying UI framework (e.g. Orkestrator)\n    to provide a better user experience. For example, a return widget that displays a\n    date could be overwriten to display a calendar widget.\n\n    Return Widgets provide more a way to customize this overwriten behavior.\n\n    "
+input ReturnWidgetInput {
+  kind: ReturnWidgetKind!
+  query: SearchQuery = null
+  choices: [ChoiceInput!] = null
+  min: Int = null
+  max: Int = null
+  step: Int = null
+  placeholder: String = null
+  hook: String = null
+  ward: String = null
+}
+
+"""The kind of return widget."""
+enum ReturnWidgetKind {
+  CHOICE
+  CUSTOM
+  PROXY
+}
+
+"""The input for creating a action demand."""
+input SchemaDemandInput {
+  """
+  The demands for the action args and returns. This is used to identify the demand in the system.
+  """
+  matches: [PortMatchInput!] = null
+}
+
+"""A way to filter by scope"""
+input ScopeFilter {
+  public: Boolean = null
+  org: Boolean = null
+  shared: Boolean = null
+  me: Boolean = null
+}
+
+type SearchAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  query: String!
+  ward: String!
+  filters: [ArgPort!]
+  dependencies: [String!]
+}
+
+"""
+The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
+"""
+scalar SearchQuery
+
+"""
+A session representing a continuous interaction of an agent with the system.
+"""
+type Session @key(fields: "id", resolvable: true) {
+  id: ID!
+  agent: Agent!
+  startedAt: DateTime!
+  endedAt: DateTime
+  snapshots: [Snapshot!]!
+  patches: [Patch!]!
+}
+
+type SessionBoundary {
+  sessionId: String!
+  startGlobalRevision: Int
+  endGlobalRevision: Int
+  startTime: DateTime
+  endTime: DateTime
+}
+
+"""A way to filter sessions"""
+input SessionFilter {
+  AND: SessionFilter
+  OR: SessionFilter
+  NOT: SessionFilter
+  DISTINCT: Boolean
+
+  """Filter by IDs"""
+  ids: [ID!]
+
+  """Filter by space"""
+  agent: ID
+}
+
+input SessionOrder @oneOf {
+  startedAt: Ordering
+  endedAt: Ordering
+}
+
+"""
+Mark an existing implementation as a higher-order wrapper of a lower implementation.
+"""
+input SetHigherOrderInput {
+  """The wrapper implementation to mark as higher-order."""
+  implementation: ID!
+
+  """The lower implementation it wraps."""
+  lowerImplementation: ID!
+
+  """
+  Projection config: bound params + arg/dependency/return maps (see Implementation.higher_order_config).
+  """
+  config: AnyDefault = null
+}
+
+input ShelveInMemoryDrawerInput {
+  """
+  The identifier of the drawer. This is used to identify the drawer in the system.
+  """
+  identifier: Identifier!
+
+  """The resource ID of the drawer."""
+  resourceId: String!
+
+  """
+  The label of the drawer. This is used to identify the drawer in the system.
+  """
+  label: String = null
+
+  """
+  The description of the drawer. This is used to identify the drawer in the system.
+  """
+  description: String = null
+}
+
+"""Shortcut to an action with preset arguments."""
+type Shortcut {
+  """Shortcut ID."""
+  id: ID!
+
+  """Name of the shortcut."""
+  name: String!
+
+  """Optional description."""
+  description: String
+
+  """The associated action."""
+  action: Action!
+
+  """Implementation of the action."""
+  implementation: Implementation
+
+  """Toolboxes that contain this shortcut."""
+  toolboxes(filters: ToolboxFilter, ordering: [ToolboxOrder!]! = [], pagination: OffsetPaginationInput): [Toolbox!]!
+
+  """Saved arguments for the shortcut."""
+  savedArgs: AnyDefault!
+
+  """Allow quick execution without modification."""
+  allowQuick: Boolean!
+
+  """If true, shortcut uses return values."""
+  useReturns: Boolean!
+
+  """
+  Which shortcut should be bound to this Action by default. 0 means no binding.
+  """
+  bindNumber: Int
+
+  """Input ports for the shortcut's action.dd"""
+  args: [ArgPort!]!
+
+  """Return ports from the shortcut's action."""
+  returns: [ReturnPort!]!
+}
+
+input ShortcutFilter {
+  AND: ShortcutFilter
+  OR: ShortcutFilter
+  NOT: ShortcutFilter
+  DISTINCT: Boolean
+  search: String
+  ids: [ID!]
+  demands: [PortDemandInput!]
+  toolbox: ID
+}
+
+input ShortcutOrder @oneOf {
+  name: Ordering
+}
+
+type SliderAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  min: Float
+  max: Float
+  step: Float
+}
+
+type Snapshot {
+  id: ID!
+  value: Args!
+  timestamp: DateTime!
+  revision: Int!
+  globalRevision: Int!
+  sessionId: String!
+  state: State!
+}
+
+"""A space where agents can interact."""
+type Space {
   id: ID!
   name: String!
-  clientId: String!
+  description: String
+  creator: User!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  placements(filters: PlacementFilter, ordering: [PlacementOrder!]! = [], pagination: OffsetPaginationInput): [Placement!]!
 }
 
-input AppFilter {
-  interface: StrFilterLookup
+"""A way to filter spaces"""
+input SpaceFilter {
+  AND: SpaceFilter
+  OR: SpaceFilter
+  NOT: SpaceFilter
+  DISTINCT: Boolean
+
+  """Filter by IDs"""
   ids: [ID!]
-  hasTemplatesFor: [NodeHash!]
-  mine: Boolean
-  AND: AppFilter
-  OR: AppFilter
+
+  """Search by name"""
+  search: String
+}
+
+input SpaceOrder @oneOf {
+  createdAt: Ordering
+  updatedAt: Ordering
+  name: Ordering
+}
+
+type State {
+  id: ID!
+
+  """The schema definition for this state."""
+  definition: StateDefinition!
+
+  """The agent to which this state belongs."""
+  agent: Agent!
+
+  """The interface this state is associated with."""
+  interface: String!
+
+  """Timestamp when this state was created."""
+  createdAt: DateTime!
+
+  """Timestamp when this state was last updated."""
+  updatedAt: DateTime!
+}
+
+type StateAccessor {
+  optionKey: OptionKey!
+  subPath: String
+}
+
+input StateAccessorInput {
+  optionKey: OptionKey!
+  subPath: String = null
+}
+
+type StateChoiceAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  statePath: String!
+  dependency: String
+  stateAccessors: [StateAccessor!]
+}
+
+type StateDefinition {
+  id: ID!
+  hash: String!
+  name: String!
+  ports: [ReturnPort!]!
+}
+
+"""
+A state schema is a blueprint for a state. It is composed of a definition, a list of dependencies, and a list of params.
+"""
+input StateDefinitionInput {
+  ports: [ReturnPortInput!]!
+  name: String!
+}
+
+"""The input for creating a action demand."""
+type StateDemand {
+  key: String!
+  hash: ActionHash
+  matches: [PortMatch!]
+  protocols: [ID!]
+}
+
+"""
+A dependency for a implementation. By defining dependencies, you can
+    create a dependency graph for your implementations and actions
+"""
+input StateDependencyInput {
+  """
+  The name of the state. This is used to identify the action in the system.
+  """
+  name: String = null
+
+  """
+  The protocols that the action is implementing or relying on. This is used to identify the demand in the system, and can be used to match actions that are implementing the same protocol together.
+  """
+  protocols: [ID!] = null
+  key: String!
+  description: String = null
+  stateKey: String = null
+  app: String = null
+  portMatches: [PortMatchInput!] = null
+  optional: Boolean! = false
+  allowInactive: Boolean = true
+}
+
+"""
+A state implementation is a blueprint for a state. It is composed of a definition, a list of dependencies, and a list of params.
+"""
+input StateImplementationInput {
+  interface: String!
+  definition: StateDefinitionInput!
+}
+
+"""A plain patch event with no model cross-references."""
+type StatePatchEvent {
+  stateId: ID!
+  agentId: ID!
+  interface: String!
+  op: String!
+  path: String!
+  value: Args!
+  globalRevision: Int!
+  sessionId: String!
+  timestamp: DateTime!
+}
+
+"""A plain snapshot of a state's current value."""
+type StateSnapshotEvent {
+  stateId: ID!
+  agentId: ID!
+  interface: String!
+  value: Args!
+  globalRevision: Int!
+  sessionId: String!
+  timestamp: DateTime!
+}
+
+union StateSnapshotEventStatePatchEvent = StateSnapshotEvent | StatePatchEvent
+
+type StateValue {
+  """The ID of the state"""
+  stateId: ID!
+
+  """The state value"""
+  value: JSON!
+
+  """The global revision of this state"""
+  globalRevision: Int
+
+  """The patches that can be applied to move forward from this state"""
+  forwardPatches: [Patch!]!
+
+  """The patches that can be applied to move backward from this state"""
+  backwardPatches: [Patch!]!
+}
+
+"""
+The input for stepping an assignation. Stepping is used to go from one breakpoint to another.
+"""
+input StepInput {
+  assignation: ID!
 }
 
 input StrFilterLookup {
@@ -274,614 +3437,399 @@ input StrFilterLookup {
   isNull: Boolean
   regex: String
   iRegex: String
-  nExact: String
-  nIExact: String
-  nContains: String
-  nIContains: String
-  nInList: [String!]
-  nGt: String
-  nGte: String
-  nLt: String
-  nLte: String
-  nStartsWith: String
-  nIStartsWith: String
-  nEndsWith: String
-  nIEndsWith: String
-  nRange: [String!]
-  nIsNull: Boolean
-  nRegex: String
-  nIRegex: String
 }
 
-"""
-The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
-"""
-scalar NodeHash
-
-input AppOrder {
-  definedAt: Ordering
+type StringAssignWidget implements AssignWidget {
+  kind: AssignWidgetKind!
+  followValue: String
+  placeholder: String!
+  asParagraph: Boolean!
 }
 
-enum Ordering {
-  ASC
-  DESC
-}
-
-input OffsetPaginationInput {
-  offset: Int! = 0
-  limit: Int! = -1
-}
-
-type HardwareRecord {
+"""A strucssture representing a data schema or type."""
+type Structure {
   id: ID!
-  cpuCount: Int!
-  cpuVendorName: String!
-  cpuFrequency: Float!
-  createdAt: DateTime!
-  agent: Agent!
-}
-
-"""Date with time (isoformat)"""
-scalar DateTime
-
-type Agent {
-  id: ID!
-  instanceId: InstanceId!
-  registry: Registry!
-  status: AgentStatus!
-  hardwareRecords(filters: HardwareRecordFilter, pagination: OffsetPaginationInput): [HardwareRecord!]!
-  templates(filters: TemplateFilter, pagination: OffsetPaginationInput): [Template!]!
-  provisions(filters: ProvisionFilter, pagination: OffsetPaginationInput): [Provision!]!
-  lastSeen: DateTime
-  connected: Boolean!
-  extensions: [String!]!
-  name: String!
-  states: [State!]!
-  template(interface: String!): Template
-  active: Boolean!
-  latestHardwareRecord: HardwareRecord
-  pinned: Boolean!
-}
-
-"""
-The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
-"""
-scalar InstanceId
-
-type Registry {
-  id: ID!
-  app: App!
-  user: User!
-  agents(filters: AgentFilter, order: AgentOrder, pagination: OffsetPaginationInput): [Agent!]!
-}
-
-type User {
-  id: ID!
-}
-
-input AgentFilter {
-  clientId: String
-  instanceId: String
-  ids: [ID!]
-  extensions: [String!]
-  hasTemplates: [String!]
-  hasStates: [String!]
-  pinned: Boolean
-  AND: AgentFilter
-  OR: AgentFilter
-}
-
-input AgentOrder {
-  lastSeen: Ordering
-}
-
-enum AgentStatus {
-  ACTIVE
-  KICKED
-  DISCONNECTED
-  VANILLA
-}
-
-input HardwareRecordFilter {
-  ids: [ID!]
-  cpuVendorName: String
-  AND: HardwareRecordFilter
-  OR: HardwareRecordFilter
-}
-
-type Template {
-  id: ID!
-  interface: String!
-  extension: String!
-  agent: Agent!
-  node: Node!
-  params: AnyDefault!
-  dependencies(filters: DependencyFilter, pagination: OffsetPaginationInput): [Dependency!]!
-  provisions(filters: ProvisionFilter, pagination: OffsetPaginationInput): [Provision!]!
-  dependencyGraph: DependencyGraph!
-  name: String!
-  pinned: Boolean!
-}
-
-type Node {
-  id: ID!
-  hash: NodeHash!
-  name: String!
-  kind: NodeKind!
-  stateful: Boolean!
+  key: ID!
+  package: StructurePackage!
   description: String
-  collections: [Collection!]!
-  templates(filters: TemplateFilter, pagination: OffsetPaginationInput): [Template!]!
-  scope: NodeScope!
-  isTestFor(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
-  isDev: Boolean!
-  tests(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
-  interfaces: [String!]!
-  protocols(filters: ProtocolFilter, order: ProtocolOrder, pagination: OffsetPaginationInput): [Protocol!]!
-  definedAt: DateTime!
-  reservations(filters: ReservationFilter, pagination: OffsetPaginationInput): [Reservation!]
-  testCases(filters: TestCaseFilter, pagination: OffsetPaginationInput): [TestCase!]
-  runs: [Assignation!]
-  dependencyGraph: DependencyGraph!
-  args: [Port!]!
-  returns: [Port!]!
-  portGroups: [PortGroup!]!
-  pinned: Boolean!
+
+  """Interfaces that this structure implements."""
+  implements(filters: InterfaceFilter, pagination: OffsetPaginationInput): [Interface!]!
+
+  """Usages of this structure as an output in actions."""
+  outputUsages(filters: OutputStructureUsageFilter, pagination: OffsetPaginationInput): [OutputStructureUsage!]!
+
+  """Usages of this structure as an input in actions."""
+  inputUsages(filters: InputStructureUsageFilter, pagination: OffsetPaginationInput): [InputStructureUsage!]!
+
+  """The object ID that this structure represents."""
+  identifier: ID!
+
+  """Get the query to retrieve data for this structure."""
+  getQuery: String
+
+  """Get the query to describe the schema of this structure."""
+  describeQuery: String
 }
 
-enum NodeKind {
-  FUNCTION
-  GENERATOR
+input StructureFilter {
+  AND: StructureFilter
+  OR: StructureFilter
+  NOT: StructureFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  search: String
 }
 
-type Collection {
+"""A package of structures."""
+type StructurePackage {
   id: ID!
-  name: String!
-  nodes(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
-}
-
-input NodeFilter {
-  search: String
-  name: StrFilterLookup
-  ids: [ID!]
-  demands: [PortDemandInput!]
-  protocols: [String!]
-  kind: NodeKind
-  AND: NodeFilter
-  OR: NodeFilter
-}
-
-input PortDemandInput {
-  kind: DemandKind!
-  matches: [PortMatchInput!] = null
-  forceLength: Int = null
-  forceNonNullableLength: Int = null
-  forceStructureLength: Int = null
-}
-
-enum DemandKind {
-  ARGS
-  RETURNS
-}
-
-input PortMatchInput {
-  at: Int = null
-  key: String = null
-  kind: PortKind = null
-  identifier: String = null
-  nullable: Boolean = null
-  children: [PortMatchInput!] = null
-}
-
-input NodeOrder {
-  definedAt: Ordering
-}
-
-input TemplateFilter {
-  interface: StrFilterLookup
-  ids: [ID!]
-  nodeHash: NodeHash
-  node: TemplateNodeFilter
-  extension: String
-  agent: TemplateAgentFilter
-  parameters: [ParamPair!]
-  AND: TemplateFilter
-  OR: TemplateFilter
-}
-
-input TemplateNodeFilter {
-  search: String
-  name: String
-  ids: [ID!]
-  demands: [PortDemandInput!]
-  protocols: [String!]
-  kind: NodeKind
-  AND: TemplateNodeFilter
-  OR: TemplateNodeFilter
-}
-
-input TemplateAgentFilter {
-  clientId: String
-  instanceId: String
-  ids: [ID!]
-  extensions: [String!]
-  hasTemplates: [String!]
-  hasStates: [String!]
-  AND: TemplateAgentFilter
-  OR: TemplateAgentFilter
-}
-
-input ParamPair {
   key: String!
-  value: String!
+  description: String
+  version: String!
+
+  """Structures that are part of this package."""
+  structures(filters: StructureFilter, pagination: OffsetPaginationInput): [Structure!]!
+
+  """Interfaces that are part of this package."""
+  interfaces(filters: InterfaceFilter, pagination: OffsetPaginationInput): [Interface!]!
 }
 
-enum NodeScope {
-  GLOBAL
-  LOCAL
-  BRIDGE_GLOBAL_TO_LOCAL
-  BRIDGE_LOCAL_TO_GLOBAL
-}
-
-type Protocol {
-  id: ID!
-  name: String!
-  nodes(filters: NodeFilter, order: NodeOrder, pagination: OffsetPaginationInput): [Node!]!
-}
-
-input ProtocolFilter {
+input StructurePackageFilter {
+  AND: StructurePackageFilter
+  OR: StructurePackageFilter
+  NOT: StructurePackageFilter
+  DISTINCT: Boolean
+  ids: [ID!]
   search: String
-  name: StrFilterLookup
-  ids: [ID!]
-  AND: ProtocolFilter
-  OR: ProtocolFilter
 }
 
-input ProtocolOrder {
-  name: Ordering
+"""Root subscription type for real-time event streams from the system."""
+type Subscription {
+  """Subscribe to notifications when new actions are created."""
+  newActions(cage: ID!): Action! @auth(required_scopes: null, required_roles: null)
+
+  """Subscribe to updates on assignations."""
+  assignations: AssignationChangeEvent! @auth(required_scopes: null, required_roles: null)
+
+  """Subscribe to events related to assignations."""
+  assignationEvents: AssignationEvent! @auth(required_scopes: null, required_roles: null)
+
+  """Subscribe to updates on agent connections and statuses."""
+  agents: AgentChangeEvent! @auth(required_scopes: null, required_roles: null)
+
+  """Subscribe to changes in implementations."""
+  implementationChange(implementation: ID!): Implementation! @auth(required_scopes: null, required_roles: null)
+
+  """Subscribe to creation or updates of implementations."""
+  implementations(agent: ID!): ImplementationUpdate! @auth(required_scopes: null, required_roles: null)
+
+  """Subscribe to updates of state values and patches."""
+  stateUpdateEvents(stateId: ID!): State! @auth(required_scopes: null, required_roles: null)
+
+  """Subscribe to latest patches for specific agents or states."""
+  latestPatches(state: ID = null, agent: ID = null): Patch! @auth(required_scopes: null, required_roles: null)
+
+  """Watch a state: yields the current snapshot then streams patches."""
+  watchState(stateId: ID = null, agentId: ID = null, interface: String = null): StateSnapshotEventStatePatchEvent! @auth(required_scopes: null, required_roles: null)
+
+  """Watch an agent: yields snapshots for all states then streams patches."""
+  watchAgent(agentId: ID!): AgentSnapshotEventStatePatchEvent! @auth(required_scopes: null, required_roles: null)
+
+  """Subscribe to child assignation events."""
+  childAssignations(id: ID!): ChildAssignationEvent! @auth(required_scopes: null, required_roles: null)
 }
 
-type Reservation {
-  id: ID!
-  name: String!
-  waiter: Waiter!
-  title: String
-  node: Node!
-  status: ReservationEventKind!
-  updatedAt: DateTime!
-  reference: String!
-  provisions(filters: ProvisionFilter, pagination: OffsetPaginationInput): [Provision!]!
-  binds: Binds
-  causingDependency: Dependency
-  causingProvision: Provision
-  strategy: ReservationStrategy!
-  viable: Boolean!
-  happy: Boolean!
-  template: Template
-  dependencyGraph: DependencyGraph!
-  events: [ReservationEvent!]!
+type TaskBoundary {
+  correlationId: String!
+  startGlobalRevision: Int
+  endGlobalRevision: Int
+  startTime: DateTime
+  endTime: DateTime
 }
 
-type Waiter {
-  id: ID!
-  instanceId: InstanceId!
-  registry: Registry!
-}
-
-enum ReservationEventKind {
-  PENDING
-  CREATE
-  RESCHEDULE
-  DELETED
-  CHANGE
-  ACTIVE
-  INACTIVE
-  UNCONNECTED
-  ENDED
-  UNHAPPY
-  HAPPY
-  LOG
-}
-
-type Provision {
-  id: ID!
-  name: String!
-  agent: Agent!
-  template: Template!
-  status: ProvisionEventKind!
-  causedReservations(filters: ReservationFilter, pagination: OffsetPaginationInput): [Reservation!]!
-  provided: Boolean!
-  active: Boolean!
-  dependenciesMet: Boolean!
-}
-
-enum ProvisionEventKind {
-  CHANGE
-  UNHAPPY
-  PENDING
-  CRITICAL
-  DENIED
-  ACTIVE
-  REFUSED
-  INACTIVE
-  CANCELING
-  DISCONNECTED
-  RECONNECTING
-  ERROR
-  ENDED
-  CANCELLED
-  BOUND
-  PROVIDING
-  LOG
-}
-
-input ReservationFilter {
-  waiter: WaiterFilter
-  ids: [ID!]
-  status: [ReservationStatus!]
-  AND: ReservationFilter
-  OR: ReservationFilter
-}
-
-input WaiterFilter {
-  instanceId: InstanceId!
-  ids: [ID!]
-  AND: WaiterFilter
-  OR: WaiterFilter
-}
-
-enum ReservationStatus {
-  ACTIVE
-  INACTIVE
-  UNHAPPY
-  HAPPY
-  UNCONNECTED
-  ENDED
-}
-
-input ProvisionFilter {
-  agent: AgentFilter
-  ids: [ID!]
-  status: [ProvisionStatus!]
-  AND: ProvisionFilter
-  OR: ProvisionFilter
-}
-
-enum ProvisionStatus {
-  DENIED
-  PENDING
-  BOUND
-  PROVIDING
-  ACTIVE
-  REFUSED
-  INACTIVE
-  CANCELING
-  DISCONNECTED
-  RECONNECTING
-  ERROR
-  CRITICAL
-  ENDED
-  CANCELLED
-}
-
-type Binds {
-  templates: [ID!]!
-  clients: [ID!]!
-  desiredInstances: Int!
-}
-
-type Dependency {
-  id: ID!
-  template: Template!
-  node: Node
-  hash: NodeHash!
-  initialHash: NodeHash!
-  reference: String
-  optional: Boolean!
-  binds: Binds
-  resolvable: Boolean!
-}
-
-enum ReservationStrategy {
-  RANDOM
-  ROUND_ROBIN
-  LEAST_BUSY
-  LEAST_TIME
-  LEAST_LOAD
-  DIRECT
-}
-
-type DependencyGraph {
-  nodes: [NodeNodeInvalidNodeTemplateNode!]!
-  edges: [DependencyEdgeImplementationEdge!]!
-}
-
-union NodeNodeInvalidNodeTemplateNode = NodeNode | InvalidNode | TemplateNode
-
-type NodeNode {
-  id: String!
-  nodeId: String!
-  name: String!
-  status: String
-  reservationId: String
-}
-
-type InvalidNode {
-  id: String!
-  initialHash: String!
-}
-
-type TemplateNode {
-  id: String!
-  templateId: String!
-  interface: String!
-  clientId: String!
-  status: String
-  provisionId: String
-  reservationId: String
-  linked: Boolean!
-  active: Boolean!
-}
-
-union DependencyEdgeImplementationEdge = DependencyEdge | ImplementationEdge
-
-type DependencyEdge {
-  id: String!
-  source: String!
-  target: String!
-  optional: Boolean!
-  depId: String!
-  reservationId: String
-}
-
-type ImplementationEdge {
-  id: String!
-  source: String!
-  target: String!
-  reservationId: String
-  linked: Boolean!
-}
-
-type ReservationEvent {
-  id: ID!
-  reservation: Reservation!
-  kind: ReservationEventKind!
-  level: LogLevel
-  createdAt: DateTime!
-}
-
-enum LogLevel {
-  DEBUG
-  INFO
-  ERROR
-  WARN
-  CRITICAL
-}
-
+"""Defines a test case comparing expected behavior for actions."""
 type TestCase {
+  """Unique ID of the test case."""
   id: ID!
-  tester: Node!
-  node: Node!
+
+  """Action used to perform the test."""
+  tester: Action!
+
+  """Target action under test."""
+  action: Action!
+
+  """If true, measures performance rather than correctness."""
   isBenchmark: Boolean!
+
+  """Details of what this test case covers."""
   description: String!
+
+  """Short name for the test case."""
   name: String!
+
+  """Results from running this test case."""
   results(filters: TestResultFilter, pagination: OffsetPaginationInput): [TestResult!]!
 }
 
-type TestResult {
-  id: ID!
-  template: Template!
-  tester: Template!
-  case: TestCase!
-  passed: Boolean!
-  createdAt: DateTime!
-  updatedAt: DateTime!
-}
-
-input TestResultFilter {
-  name: StrFilterLookup
-  ids: [ID!]
-  AND: TestResultFilter
-  OR: TestResultFilter
-}
-
+"""A way to filter test cases"""
 input TestCaseFilter {
   name: StrFilterLookup
-  ids: [ID!]
   AND: TestCaseFilter
   OR: TestCaseFilter
+  NOT: TestCaseFilter
+  DISTINCT: Boolean
+  ids: [ID!]
 }
 
-type Assignation {
+"""Result from executing a test case with specific implementations."""
+type TestResult {
+  """ID of the test result."""
+  id: ID!
+
+  """Implementation under test."""
+  implementation: Implementation!
+
+  """Implementation running the test."""
+  tester: Implementation!
+
+  """Associated test case."""
+  case: TestCase!
+
+  """True if test passed."""
+  passed: Boolean!
+
+  """When the test was executed."""
+  createdAt: DateTime!
+
+  """When the test result was last updated."""
+  updatedAt: DateTime!
+}
+
+"""A way to filter test results"""
+input TestResultFilter {
+  name: StrFilterLookup
+  AND: TestResultFilter
+  OR: TestResultFilter
+  NOT: TestResultFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+}
+
+"""A 3D model file."""
+type ThreeDModel {
   id: ID!
   name: String!
-  reference: String
-  args: AnyDefault!
-
-  """
-  A mother assignation is the root assignation that caused this assignation to be created. This mother is always created by intent (e.g a user action). If null, this assignation is the mother
-  """
-  mother: Assignation
-
-  """
-  A parent assignation is the next assignation in the chain of assignations that caused this assignation to be created. Parents can be created by intent or by the system. If null, this assignation is the parent
-  """
-  parent: Assignation
-
-  """
-  If this assignation is the result of a reservation, this field will contain the reservation that caused this assignation to be created
-  """
-  reservation: Reservation
-
-  """The node that this assignation is assigned to"""
-  node: Node!
-
-  """If set, this assignation was directly assigned to a template"""
-  template: Template
-
-  """The status of this assignation"""
-  status: AssignationEventKind!
-  statusMessage: String
-
-  """The Waiter that this assignation was created by"""
-  waiter: Waiter!
+  description: String
+  transferFunction: String
+  dependency: Agent!
+  file: MediaStore!
   createdAt: DateTime!
   updatedAt: DateTime!
-
-  """The provision that this assignation was assigned to"""
-  provision: Provision
-  events: [AssignationEvent!]!
-  arg(key: String!): Args
 }
 
-enum AssignationEventKind {
-  BOUND
-  QUEUED
-  ASSIGN
-  PROGRESS
-  DISCONNECTED
-  YIELD
-  DONE
-  LOG
-  CANCELING
-  CANCELLED
-  INTERUPTING
-  INTERUPTED
-  ERROR
-  CRITICAL
+"""A way to filter 3D models"""
+input ThreeDModelFilter {
+  AND: ThreeDModelFilter
+  OR: ThreeDModelFilter
+  NOT: ThreeDModelFilter
+  DISTINCT: Boolean
+
+  """Filter by IDs"""
+  ids: [ID!]
+
+  """Search by name"""
+  search: String
 }
 
-type AssignationEvent {
+input ThreeDModelOrder @oneOf {
+  createdAt: Ordering
+  updatedAt: Ordering
+  name: Ordering
+}
+
+type TimeBucket {
+  ts: DateTime!
+  count: Int!
+  distinctCount: Int!
+  max: Float
+  min: Float
+  avg: Float
+  sum: Float
+}
+
+"""A collection of shortcuts grouped as a toolbox."""
+type Toolbox {
+  """Toolbox ID."""
+  id: ID!
+
+  """Name of the toolbox."""
+  name: String!
+
+  """Description of the toolbox."""
+  description: String!
+
+  """List of shortcuts in this toolbox."""
+  shortcuts(filters: ShortcutFilter, ordering: [ShortcutOrder!]! = [], pagination: OffsetPaginationInput): [Shortcut!]!
+}
+
+input ToolboxFilter {
+  name: StrFilterLookup
+  AND: ToolboxFilter
+  OR: ToolboxFilter
+  NOT: ToolboxFilter
+  DISTINCT: Boolean
+  ids: [ID!]
+  search: String
+}
+
+input ToolboxOrder @oneOf {
+  name: Ordering
+}
+
+"""
+A value that is being tracked over time during the runtime of an action. This is the state of a dependency
+"""
+type Track {
+  dependencyKey: String
+  stateKey: String!
+  valueKey: String!
+  label: String
+  description: String
+  windows: [Window!]
+}
+
+"""
+A value that is being tracked over time during the runtime of an action. This is the state of a dependency
+"""
+input TrackInput {
+  dependencyKey: String = null
+  stateKey: String!
+  valueKey: String!
+  label: String = null
+  description: String = null
+  windows: [WindowInput!] = null
+}
+
+type UICatalog {
   id: ID!
   name: String!
-  returns: AnyDefault
-  assignation: Assignation!
-  kind: AssignationEventKind!
-  message: String
-  level: LogLevel
-  progress: Int
-  createdAt: DateTime!
-  reference: String!
+  description: String
 }
 
-"""The `Args` scalar type represents a Dictionary of arguments"""
-scalar Args
+"""The input for bouncing an agent."""
+input UnblockInput {
+  agent: ID!
+}
 
-type Port {
-  key: String!
-  scope: PortScope!
-  label: String
-  kind: PortKind!
-  description: String
-  identifier: Identifier
-  nullable: Boolean!
-  effects: [Effect!]
-  default: AnyDefault
-  children: [ChildPort!]
-  assignWidget: AssignWidget
-  returnWidget: ReturnWidget
-  groups: [String!]
-  validators: [Validator!]
+input UnshelveMemoryDrawerInput {
+  """The resource ID of the drawer."""
+  id: String!
+}
+
+"""The input for updating an agent."""
+input UpdateAgentInput {
+  id: ID!
+  name: String = null
+}
+
+"""The input for updating a blok."""
+input UpdateBlokInput {
+  id: ID!
+
+  """The name of the blok, used for identification in the system."""
+  name: String = null
+
+  """The description of the blok and its purpose."""
+  description: String = null
+
+  """
+  The components of the blok. This is used to update the blok in the system.
+  """
+  components: [ComponentNodeInput!] = null
+}
+
+"""
+Input for updating a dashboard. This is used to update the properties of a dashboard, such as its name, associated bloks, or organization.
+"""
+input UpdateDashboardInput {
+  """The ID of the dashboard to update."""
+  id: ID!
+
+  """The new name of the dashboard."""
+  name: String = null
+
+  """
+  The new list of blok IDs to include in the dashboard. This will replace the existing list if provided.
+  """
+  bloks: [String!] = null
+
+  """The new organization ID to associate with the dashboard."""
+  organization: String = null
+}
+
+"""
+Input for updating a materialized blok. This is used to update the properties of a materialized blok, such as its associated agent mappings.
+"""
+input UpdateMaterializedBlokInput {
+  """The ID of the materialized blok to update."""
+  id: ID!
+
+  """
+  The list of mapped agents to update the materialized blok with. This is used to update the agent mappings of the materialized blok.
+  """
+  agentMappings: [MappedAgentInput!] = null
+}
+
+"""The input for updating a placement."""
+input UpdatePlacementInput {
+  role: String = null
+  affineMatrix: [[Float!]!] = null
+  model: ID = null
+  id: ID!
+}
+
+"""The input for creating a resolution."""
+input UpdateResolutionInput {
+  id: ID!
+  name: String!
+  resolvedDependencies: [ResolvedDependencyInput!] = null
+}
+
+"""The input for updating a space."""
+input UpdateSpaceInput {
+  id: ID!
+  name: String = null
+  description: String = null
+}
+
+"""The input for updating a 3D model."""
+input UpdateThreeDModelInput {
+  id: ID!
+  name: String = null
+  description: String = null
+  media: ID = null
+}
+
+"""Represents an authenticated user."""
+type User @key(fields: "id", resolvable: true) {
+  """Unique ID of the user."""
+  id: ID!
+
+  """The subject identifier of the user."""
+  sub: ID!
+}
+
+"""Defines a utility call that can be invoked within the system."""
+type UtilCall {
+  operation: String!
+  arguments: [ActionArgument!]
+}
+
+"""Defines a utility call that can be invoked within the system."""
+input UtilCallInput {
+  operation: String!
+  arguments: [ActionArgumentInput!] = null
 }
 
 type Validator {
@@ -894,156 +3842,7 @@ type Validator {
 "\n    The `Validator` scalar represents a javascript function that should execute on the client side (inside a shadow realm)\n      to validate a value (or a set of values) before it is sent to the server.  The function has two parameters (value, otherValues) and should return a string if the value is invalid and undefined if the value is valid.\n        The otherValues parameter is an object with the other values in the form {fieldName: value}."
 scalar ValidatorFunction
 
-type PortGroup {
-  key: String!
-  hidden: Boolean!
-}
-
-input DependencyFilter {
-  ids: [ID!]
-  AND: DependencyFilter
-  OR: DependencyFilter
-}
-
-type State {
-  id: ID!
-  stateSchema: StateSchema!
-  value: Args!
-  agent: Agent!
-  createdAt: DateTime!
-  updatedAt: DateTime!
-  historicalStates: [HistoricalState!]!
-}
-
-type StateSchema {
-  id: ID!
-  hash: String!
-  name: String!
-  ports: [Port!]!
-}
-
-type HistoricalState {
-  id: ID!
-  state: State!
-  value: Args!
-  archivedAt: DateTime!
-}
-
-type Dashboard {
-  id: ID!
-  name: String
-  panels: [Panel!]
-  uiTree: UITree
-}
-
-type Panel {
-  id: ID!
-  kind: PanelKind!
-  name: String!
-  reservation: Reservation
-  state: State
-  accessors: [String!]
-  submitOnLoad: Boolean!
-  submitOnChange: Boolean!
-}
-
-enum PanelKind {
-  STATE
-  ASSIGN
-}
-
-type UITree {
-  child: UIChild!
-}
-
-type Mutation {
-  createTemplate(input: CreateTemplateInput!): Template!
-  createForeignTemplate(input: CreateForeignTemplateInput!): Template!
-  setExtensionTemplates(input: SetExtensionTemplatesInput!): [Template!]!
-  ack(input: AckInput!): Assignation!
-  assign(input: AssignInput!): Assignation!
-  cancel(input: CancelInput!): Assignation!
-  interrupt(input: InterruptInput!): Assignation!
-
-  """Provide a provision"""
-  provide(input: ProvideInput!): Provision!
-  reserve(input: ReserveInput!): Reservation!
-  link(input: LinkInput!): Provision!
-  unlink(input: UnlinkInput!): Provision!
-  unreserve(input: UnreserveInput!): String!
-
-  """Delete a template"""
-  deleteTemplate(input: DeleteTemplateInput!): String!
-  ensureAgent(input: AgentInput!): Agent!
-  createTestCase(input: CreateTestCaseInput!): TestCase!
-  createTestResult(input: CreateTestResultInput!): TestResult!
-  activate(input: ActivateInput!): Provision!
-  deactivate(input: DeActivateInput!): Provision!
-  createHardwareRecord(input: CreateHardwareRecordInput!): HardwareRecord!
-  createDashboard(input: CreateDashboardInput!): Dashboard!
-  createStateSchema(input: CreateStateSchemaInput!): StateSchema!
-  createPanel(input: CreatePanelInput!): Panel!
-  setState(input: SetStateInput!): State!
-  updateState(input: UpdateStateInput!): State!
-  archiveState(input: ArchiveStateInput!): StateSchema!
-  pinAgent(input: PinInput!): Agent!
-  pinTemplate(input: PinInput!): Template!
-  reinit(input: ReInitInput!): String!
-  unprovide(input: UnProvideInput!): ID!
-  deleteAgent(input: DeleteAgentInput!): ID!
-}
-
-input CreateTemplateInput {
-  template: TemplateInput!
-  instanceId: InstanceId!
-  extension: String!
-}
-
-input TemplateInput {
-  definition: DefinitionInput!
-  dependencies: [DependencyInput!]!
-  interface: String!
-  params: AnyDefault = null
-  dynamic: Boolean! = false
-  logo: String = null
-}
-
-input DefinitionInput {
-  description: String = null
-  collections: [String!]! = []
-  name: String!
-  stateful: Boolean! = false
-  portGroups: [PortGroupInput!]! = []
-  args: [PortInput!]! = []
-  returns: [PortInput!]! = []
-  kind: NodeKind!
-  isTestFor: [String!]! = []
-  interfaces: [String!]! = []
-  isDev: Boolean! = false
-}
-
-input PortGroupInput {
-  key: String!
-  hidden: Boolean!
-}
-
-input PortInput {
-  validators: [ValidatorInput!] = null
-  key: String!
-  scope: PortScope!
-  label: String = null
-  kind: PortKind!
-  description: String = null
-  identifier: String = null
-  nullable: Boolean! = false
-  effects: [EffectInput!] = null
-  default: AnyDefault = null
-  children: [ChildPortInput!] = null
-  assignWidget: AssignWidgetInput = null
-  returnWidget: ReturnWidgetInput = null
-  groups: [String!] = null
-}
-
+" \nA validating function for a port. Can specify a function that will run when validating values of the port.\nIf outside dependencies are needed they need to be specified in the dependencies field. With the .. syntax\nwhen transversing the tree of ports. \n\n"
 input ValidatorInput {
   function: ValidatorFunction!
   dependencies: [String!] = []
@@ -1051,309 +3850,22 @@ input ValidatorInput {
   errorMessage: String = null
 }
 
-input EffectInput {
-  label: String!
-  description: String
-  dependencies: [EffectDependencyInput!]!
-  kind: EffectKind!
+"""A window that is calculated"""
+type Window {
+  windowFunction: String!
+  label: String
 }
 
-input EffectDependencyInput {
-  key: String!
-  condition: LogicalCondition!
-  value: AnyDefault!
-}
-
-input ChildPortInput {
-  default: AnyDefault = null
-  key: String!
+"""A window that is calculated"""
+input WindowInput {
+  windowFunction: String!
   label: String = null
-  kind: PortKind!
-  scope: PortScope!
-  description: String = null
-  identifier: Identifier = null
-  nullable: Boolean!
-  children: [ChildPortInput!] = null
-  effects: [EffectInput!] = null
-  assignWidget: AssignWidgetInput = null
-  returnWidget: ReturnWidgetInput = null
 }
 
-input AssignWidgetInput {
-  asParagraph: Boolean = null
-  kind: AssignWidgetKind!
-  query: SearchQuery = null
-  choices: [ChoiceInput!] = null
-  stateChoices: String = null
-  followValue: String = null
-  min: Float = null
-  max: Float = null
-  step: Float = null
-  placeholder: String = null
-  hook: String = null
-  ward: String = null
-  fallback: AssignWidgetInput = null
-  filters: [ChildPortInput!] = null
-}
+scalar _Any
 
-"""
-The `ArrayLike` scalar type represents a reference to a store previously created by the user n a datalayer
-"""
-scalar SearchQuery
+union _Entity = MediaStore | Session | User
 
-input ChoiceInput {
-  value: AnyDefault!
-  label: String!
-  description: String = null
-}
-
-input ReturnWidgetInput {
-  kind: ReturnWidgetKind!
-  query: SearchQuery = null
-  choices: [ChoiceInput!] = null
-  min: Int = null
-  max: Int = null
-  step: Int = null
-  placeholder: String = null
-  hook: String = null
-  ward: String = null
-}
-
-input DependencyInput {
-  hash: NodeHash
-  reference: String = null
-  binds: BindsInput = null
-  optional: Boolean! = false
-  viableInstances: Int = null
-}
-
-input BindsInput {
-  templates: [String!] = null
-  clients: [String!] = null
-  desiredInstances: Int! = 1
-}
-
-input CreateForeignTemplateInput {
-  agent: ID!
-  template: TemplateInput!
-  extension: String!
-}
-
-input SetExtensionTemplatesInput {
-  templates: [TemplateInput!]!
-  instanceId: InstanceId!
-  extension: String!
-  runCleanup: Boolean! = false
-}
-
-input AckInput {
-  assignation: ID!
-}
-
-input AssignInput {
-  instanceId: InstanceId!
-  node: ID = null
-  template: ID = null
-  reservation: ID = null
-  hooks: [HookInput!] = null
-  args: Args!
-  reference: String = null
-  parent: ID = null
-  cached: Boolean! = false
-  log: Boolean! = false
-  ephemeral: Boolean! = false
-  isHook: Boolean! = false
-}
-
-input HookInput {
-  kind: HookKind!
-  hash: String!
-}
-
-enum HookKind {
-  CLEANUP
-  INIT
-}
-
-input CancelInput {
-  assignation: ID!
-}
-
-input InterruptInput {
-  assignation: ID!
-}
-
-input ProvideInput {
-  provision: ID!
-}
-
-input ReserveInput {
-  assignationId: String = null
-  instanceId: InstanceId!
-  node: ID = null
-  template: ID = null
-  title: String = null
-  hash: NodeHash = null
-  reference: String = null
-  binds: BindsInput = null
-}
-
-input LinkInput {
-  provision: ID!
-  reservation: ID!
-}
-
-input UnlinkInput {
-  provision: ID!
-  reservation: ID!
-}
-
-input UnreserveInput {
-  reservation: ID!
-}
-
-input DeleteTemplateInput {
-  template: ID!
-}
-
-input AgentInput {
-  instanceId: InstanceId!
-  name: String = null
-  extensions: [String!] = null
-}
-
-input CreateTestCaseInput {
-  node: ID!
-  tester: ID!
-  description: String = null
-  name: String = null
-}
-
-input CreateTestResultInput {
-  case: ID!
-  tester: ID!
-  template: ID!
-  passed: Boolean!
-  result: String = null
-}
-
-input ActivateInput {
-  provision: ID!
-}
-
-input DeActivateInput {
-  provision: ID!
-}
-
-input CreateHardwareRecordInput {
-  cpuCount: Int = null
-  cpuFrequency: Float = null
-  cpuVendorName: String = null
-  instanceId: InstanceId = null
-}
-
-input CreateDashboardInput {
-  name: String = null
-  panels: [ID!] = null
-  tree: UITreeInput = null
-}
-
-input UITreeInput {
-  child: UIChildInput!
-}
-
-input UIChildInput {
-  state: String = null
-  kind: UIChildKind!
-  hidden: Boolean
-  children: [UIChildInput!] = null
-  left: UIChildInput = null
-  right: UIChildInput = null
-}
-
-input CreateStateSchemaInput {
-  stateSchema: StateSchemaInput!
-}
-
-input StateSchemaInput {
-  ports: [PortInput!]!
-  name: String!
-}
-
-input CreatePanelInput {
-  name: String!
-  kind: PanelKind!
-  state: ID = null
-  stateKey: String = null
-  reservation: ID = null
-  instanceId: InstanceId = null
-  stateAccessors: [String!] = null
-  interface: String = null
-  args: Args = null
-  submitOnChange: Boolean = false
-  submitOnLoad: Boolean = false
-}
-
-input SetStateInput {
-  stateSchema: ID!
-  instanceId: InstanceId!
-  value: Args!
-}
-
-input UpdateStateInput {
-  stateSchema: ID!
-  instanceId: InstanceId!
-  patches: [Args!]!
-}
-
-input ArchiveStateInput {
-  stateSchema: ID!
-}
-
-input PinInput {
-  id: ID!
-  pin: Boolean!
-}
-
-input ReInitInput {
-  agent: ID = null
-}
-
-input UnProvideInput {
-  provision: ID!
-}
-
-input DeleteAgentInput {
-  id: ID!
-}
-
-type Subscription {
-  newNodes(cage: ID!): Node!
-  assignations(instanceId: InstanceId!): AssignationChangeEvent!
-  reservations(instanceId: InstanceId!): Reservation!
-  assignationEvents(instanceId: InstanceId!): AssignationEvent!
-  reservationEvents(instanceId: InstanceId!): ReservationEvent!
-  provisionEvents(instanceId: InstanceId!): ProvisionEvent!
-  templateChange(template: ID!): Template!
-  templates(agent: ID!): TemplateUpdate!
-  stateUpdateEvents(stateId: ID!): State!
-}
-
-type AssignationChangeEvent {
-  event: AssignationEvent
-  create: Assignation
-}
-
-type ProvisionEvent {
-  id: ID!
-  provision: Provision!
-  kind: ProvisionEventKind!
-  level: LogLevel
-  createdAt: DateTime!
-}
-
-type TemplateUpdate {
-  create: Template!
-  update: Template!
-  delete: ID!
+type _Service {
+  sdl: String!
 }

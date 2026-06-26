@@ -2,40 +2,29 @@ package com.mycompany.arkitekt
 
 import com.apollographql.apollo.api.Optional
 import com.mycompany.rekuest.graphql.EnsureAgentMutation
-import com.mycompany.rekuest.graphql.GetProvisionQuery
-import com.mycompany.rekuest.graphql.SetExtensionTemplatesMutation
+import com.mycompany.rekuest.graphql.ImplementAgentMutation
 import com.mycompany.rekuest.graphql.type.AgentInput
 import com.mycompany.rekuest.graphql.type.DefinitionInput
-import com.mycompany.rekuest.graphql.type.SetExtensionTemplatesInput
-import com.mycompany.rekuest.graphql.type.TemplateInput
+import com.mycompany.rekuest.graphql.type.ImplementAgentInput
+import com.mycompany.rekuest.graphql.type.ImplementationInput
 import io.ktor.client.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.client.request.*
-import io.ktor.client.statement.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import io.ktor.serialization.kotlinx.*
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.*
-// A registry that returns functions for a given template ID.
-// Each function takes (App, String) where the second param is JSON args.
+import java.util.concurrent.ConcurrentHashMap
 
-
-
-
+// A registry mapping an interface name -> (implementation function, its DefinitionInput).
+// Each function takes (App, args) and returns the yielded values.
 public class FunctionRegistry(
     private val functions: MutableMap<String, suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>> = mutableMapOf(),
     public val definitions: MutableMap<String, DefinitionInput> = mutableMapOf()
 ) {
     fun get_function(
-        id: String
-    ): (suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>)? = functions[id]
+        function_name: String
+    ): (suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>)? = functions[function_name]
 
 
     fun register_function(
@@ -43,180 +32,150 @@ public class FunctionRegistry(
         definitionInput: DefinitionInput,
         function: suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>
     ) {
-
-            functions[at] = function
-            definitions[at] = definitionInput
-
+        functions[at] = function
+        definitions[at] = definitionInput
     }
 }
 
 public class Agent(
         private val client: Rekuest,
-        private val config: RekuestFakt,
+        private val alias: Alias,
         private val token: String,
         private val registry: FunctionRegistry,
-        private val app: App,
-        private val instanceId: String
+        private val app: App
 ) {
-    private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun createAgent(
-            name: String,
-            extensions: List<String>
-    ): Result<Unit> {
+    // Register (or look up) the agent record. The agent is identified by the token + name;
+    // there is no instanceId in the current protocol.
+    suspend fun createAgent(name: String): Result<Unit> {
         return kotlin.runCatching {
-            val request =
-                    EnsureAgentMutation(
-                            AgentInput(
-                                    instanceId = instanceId,
-                                    name = Optional.present(name),
-                                    extensions = Optional.present(extensions)
-                            )
-                    )
+            val request = EnsureAgentMutation(AgentInput(name = Optional.present(name)))
             app.rekuest.getClient().mutation(request).execute().data
         }
     }
 
+    // Advertise all registered implementations to the server in a single implementAgent call.
     suspend fun registerFunctions() {
-        var templateInputs = registry.definitions.entries.map {
-            (id, definition ) ->
-            TemplateInput(
-                    `interface` = id,
-                    definition = definition,
-                    dependencies = listOf()
+        val implementations =
+                registry.definitions.entries.map { (functionName, definition) ->
+                    ImplementationInput(
+                            definition = definition,
+                            `interface` = Optional.present(functionName)
+                    )
+                }
+
+        val mutation =
+                ImplementAgentMutation(
+                        ImplementAgentInput(implementations = Optional.present(implementations))
                 )
-            }
 
-
-        var mutation = SetExtensionTemplatesMutation(
-                SetExtensionTemplatesInput(
-                    instanceId = instanceId,
-                    templates = templateInputs,
-                    extension = "default",
-                    runCleanup = Optional.present(true)
-                )
-            )
-
-
-        app.rekuest.getClient().mutation(mutation).execute().data
+        val response = app.rekuest.getClient().mutation(mutation).execute()
+        println("implementAgent -> ${response.data}")
     }
 
     suspend fun provideForever(): Result<String> {
         return coroutineScope {
-            val messageChannel = Channel<Any>(capacity = 100)
+            val outbound = Channel<AgentEvent>(capacity = 100)
+            // Running tasks keyed by task id, so CANCEL/INTERRUPT can stop them.
+            val runningJobs = ConcurrentHashMap<String, Job>()
+            // Per-process session id: a fresh value tells the backend this is a fresh process.
+            val sessionId = java.util.UUID.randomUUID().toString()
 
-            val wsClient = HttpClient {
-                install(WebSockets) {
-                    contentConverter = KotlinxWebsocketSerializationConverter(Json {
-                        encodeDefaults = true
-                    }
-                    )
-                }
-            }
+            val wsClient = HttpClient { install(WebSockets) }
 
-            // Connect to the endpoint
             try {
-                val session = wsClient.webSocketSession { url(config.agent.endpoint_url) }
-                // Launch a sender coroutine
-                val senderJob = launch {
-                    // Send initial message
-                    val init = InitialAgentMessage(instance_id = "default", token = token)
-                    session.sendSerialized(init)
+                val session = wsClient.webSocketSession { url(alias.to_ws_path("agi")) }
 
-                    // Continuously send any queued messages
-                    for (msg in messageChannel) {
-                        println("Sending message: $msg")
-                        session.sendSerialized(msg)
+                suspend fun send(event: AgentEvent) {
+                    session.send(Frame.Text(agentJson.encodeToString(AgentEvent.serializer(), event)))
+                }
+
+                // Sender: REGISTER first, then drain queued events.
+                val senderJob = launch {
+                    send(AgentEvent.Register(token = token, force = false, sessionId = sessionId))
+                    for (event in outbound) {
+                        send(event)
                     }
                 }
 
-                // Launch a receiver coroutine
+                // Receiver: dispatch inbound messages.
                 val receiverJob = launch {
                     for (frame in session.incoming) {
-                        frame as? Frame.Text ?: continue
-                        val text = frame.readText()
-                        println("Received message: $text")
+                        val text = (frame as? Frame.Text)?.readText() ?: continue
 
                         val msg =
                                 runCatching {
-                                    json.decodeFromString(AgentMessage.serializer(), text)
-                                }
-                                        .getOrElse {
-                                            println("Failed to deserialize message: $it $text")
+                                            agentJson.decodeFromString(AgentMessage.serializer(), text)
                                         }
+                                        .getOrElse {
+                                            println("Ignoring undecodable message: $it -- $text")
+                                            null
+                                        }
+                                        ?: continue
 
                         when (msg) {
-                            is AgentMessage.Heartbeat -> {
-                                val heartbeatResponse = HeartbeatResponseMessage("HEARTBEAT")
-                                println(heartbeatResponse.type)
-                                messageChannel.send(heartbeatResponse)
-                                println("Received heartbeat")
-                            }
-                            is AgentMessage.Initial -> {
-                                println("Received initial message: ${msg.instance_id}")
-                            }
+                            is AgentMessage.Heartbeat -> outbound.send(AgentEvent.HeartbeatAnswer())
+                            is AgentMessage.Init ->
+                                    println(
+                                            "Agent registered as ${msg.agent}; pending inquiries=${msg.inquiries.size}"
+                                    )
                             is AgentMessage.Assign -> {
-                                println("Received assignment: ${msg.provision}")
-                                // Fetch provision details
-                                val getProvisionQuery = GetProvisionQuery(id = msg.provision.toString())
-                                val response =
-                                        app.rekuest.getClient().query(getProvisionQuery).execute()
-                                val template = response.data?.provision?.template?.`interface`
-
-                                if (template == null) {
-                                    throw Exception("Template does not exist")
-                                }
-
-                                val func = registry.get_function(template)
-
-                                if (func != null) {
-
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        try {
-
-                                            val returns = func(app, msg.args ?: mapOf())
-                                            // Send a YIELD event
-                                            val eventYield =
-                                                AssignationEventMessage(
-                                                    assignation = msg.assignation,
-                                                    kind = "YIELD",
-                                                    returns = returns
-                                                )
-                                            messageChannel.send(
-                                                eventYield
+                                val func = registry.get_function(msg.functionName)
+                                if (func == null) {
+                                    println("No implementation for interface '${msg.functionName}'")
+                                    outbound.send(
+                                            AgentEvent.Critical(
+                                                    msg.task,
+                                                    "No implementation for '${msg.functionName}'"
                                             )
-
-                                            // Send a DONE event
-                                            val eventDone =
-                                                AssignationEventMessage(
-                                                    assignation = msg.assignation,
-                                                    kind = "DONE"
-                                                )
-                                            messageChannel.send(eventDone)
-                                        } catch (e: Exception) {
-                                            val eventError = AssignationEventMessage(
-                                                assignation = msg.assignation,
-                                                kind = "CRITICAL",
-                                                message = e.message.toString(),
-
-                                                )
-
-                                            messageChannel.send(eventError)
-                                        }
-                                    }
-                                } else {
-                                    println("Function not found: $template")
+                                    )
+                                    continue
                                 }
+                                val job =
+                                        launch(Dispatchers.IO) {
+                                            try {
+                                                outbound.send(AgentEvent.Started(msg.task))
+                                                val returns = func(app, msg.args)
+                                                outbound.send(AgentEvent.Yield(msg.task, returns))
+                                                outbound.send(AgentEvent.Completed(msg.task))
+                                            } catch (e: CancellationException) {
+                                                throw e
+                                            } catch (e: Exception) {
+                                                outbound.send(
+                                                        AgentEvent.Critical(
+                                                                msg.task,
+                                                                e.message ?: e.toString()
+                                                        )
+                                                )
+                                            } finally {
+                                                runningJobs.remove(msg.task)
+                                            }
+                                        }
+                                runningJobs[msg.task] = job
                             }
-                            is AgentMessage.Provide -> {
-                                println("Received provision: ${msg.provision}")
+                            is AgentMessage.Cancel -> {
+                                runningJobs.remove(msg.task)?.cancel()
+                                outbound.send(AgentEvent.Cancelled(msg.task))
                             }
-                            is AgentMessage.Unprovide -> {
-                                println("Received unprovide")
+                            is AgentMessage.Interrupt -> {
+                                runningJobs.remove(msg.task)?.cancel()
+                                outbound.send(AgentEvent.Interrupted(msg.task))
                             }
-                            is AgentMessage.Error -> {
-                                println("Received error: ${msg.code}")
+                            // Plain functions can't truly suspend mid-run; acknowledge to stay
+                            // protocol-compliant.
+                            is AgentMessage.Pause -> outbound.send(AgentEvent.Paused(msg.task))
+                            is AgentMessage.Resume -> outbound.send(AgentEvent.Resumed(msg.task))
+                            // We persist nothing, so the durability ack is informational only.
+                            is AgentMessage.EventAck -> {}
+                            is AgentMessage.Kick -> {
+                                println("Kicked by server: ${msg.reason}")
+                                break
                             }
+                            is AgentMessage.Bounce -> {
+                                println("Server requested reconnect (bounce)")
+                                break
+                            }
+                            is AgentMessage.ProtocolError -> println("Protocol error: ${msg.error}")
                         }
                     }
                 }
@@ -224,13 +183,16 @@ public class Agent(
                 try {
                     receiverJob.join()
                     senderJob.cancelAndJoin()
-                } catch (e: Exception) {} finally {
-                    messageChannel.close()
+                } catch (e: Exception) {
+                    println("Closed with exception $e")
+                } finally {
+                    runningJobs.values.forEach { it.cancel() }
+                    outbound.close()
                     session.close()
                     wsClient.close()
                 }
             } catch (e: Exception) {
-                println("Connection closed")
+                println("Connection closed: ${e.message}")
             }
 
             Result.success("Connection closed")
