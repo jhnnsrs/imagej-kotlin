@@ -70,6 +70,10 @@ import net.imglib2.type.numeric.integer.UnsignedShortType
 import net.imglib2.type.numeric.real.FloatType
 import ucar.ma2.*
 import org.scijava.Context
+import org.scijava.convert.ConvertService
+import ij.IJ
+import ij.ImagePlus
+import ij.WindowManager
 import net.imglib2.Cursor
 import com.apollographql.apollo.interceptor.ApolloInterceptor
 import com.apollographql.apollo.interceptor.ApolloInterceptorChain
@@ -148,7 +152,17 @@ data class FaktsEndpoint(
         val name: String,
         val base_url: String? = null,
         val version: String? = null,
+        val protocol_version: String? = null,
         val description: String? = null,
+        val frontend_url: String? = null,
+        // New-style: explicit, fully-qualified endpoint URLs. `configure` carries a
+        // `{code}` placeholder that must be substituted with the device code.
+        val claim: String? = null,
+        val configure: String? = null,
+        val device_code_start: String? = null,
+        val challenge_url: String? = null,
+        // Legacy-style fields (older coordination servers). Kept for backwards compat;
+        // the corresponding URLs are derived from `base_url` when absent.
         val configure_url: String? = null,
         val claim_url: String? = null,
         val retrieve_url: String? = null,
@@ -844,6 +858,45 @@ fun loadArrayAsDataset(app: App, store: DatalayerStore, name: String): Dataset {
 
 
 
+// Run an arbitrary ImageJ (IJ1) macro against a Dataset and return the transformed Dataset.
+//
+// The macro engine (`ij.IJ.runMacro`) is IJ1-only, so this needs the ImageJ legacy layer on the
+// classpath — present when the plugin runs inside Fiji, absent from the standalone `./gradlew run`
+// ImageJ (see build.gradle.kts: imagej-legacy is compileOnly). The conversion Dataset<->ImagePlus
+// is done through the SciJava ConvertService, whose converters imagej-legacy registers at runtime.
+//
+// The image is made the IJ1 "current image" via WindowManager.setTempCurrentImage — this avoids
+// opening/closing an AWT window (so it is safe to call off the EDT, which is where the agent
+// handler runs) and is the standard pattern for programmatic image-to-image macros, which operate
+// in place on the current image. If the macro replaces the current image, we read that back instead.
+fun runMacroOnDataset(app: App, dataset: Dataset, macro: String): Dataset {
+    val context = app.datasetService.context()
+    val convertService = context.getService(ConvertService::class.java)
+            ?: throw IllegalStateException("ConvertService is unavailable in this context.")
+
+    val imp = convertService.convert(dataset, ImagePlus::class.java)
+            ?: throw IllegalStateException(
+                    "Could not convert the image to an IJ1 ImagePlus. Running macros requires the " +
+                            "ImageJ legacy layer (Fiji / imagej-legacy) on the classpath — it is not " +
+                            "available in the standalone `./gradlew run` ImageJ."
+            )
+
+    val result: ImagePlus =
+            try {
+                WindowManager.setTempCurrentImage(imp)
+                IJ.runMacro(macro)
+                // Prefer whatever the macro left as the current image (a macro may replace it);
+                // fall back to the in-place-modified input.
+                WindowManager.getCurrentImage() ?: imp
+            } finally {
+                WindowManager.setTempCurrentImage(null)
+            }
+
+    return convertService.convert(result, Dataset::class.java)
+            ?: throw IllegalStateException("Could not convert the macro result back to a Dataset.")
+}
+
+
 class Arkitekt(
         private val uiService: UIService,
         private val datasetService: DatasetService,
@@ -856,6 +909,10 @@ class Arkitekt(
     // Tracked so logout() can tear the connection down.
     private var provideJob: Job? = null
 
+    // The background coroutine running an in-flight login (device-code challenge poll).
+    // Tracked so it can be cancelled (cancelLogin()/logout()) mid-flight.
+    private var loginJob: Job? = null
+
     // The lok/management endpoint now arrives as ActiveFakts.self.alias, so it is no longer a
     // requirement here. Only the services the app actually talks to are requested.
     private val manifest =
@@ -863,6 +920,7 @@ class Arkitekt(
                     identifier = "imagej",
                     version = "0.1.0",
                     scopes = listOf("openid"),
+                    node_id = NodeId.getOrSet(),
                     requirements = listOf(
                             Requirement(key = "rekuest", service = "live.arkitekt.rekuest"),
                             Requirement(key = "mikro", service = "live.arkitekt.mikro"),
@@ -880,6 +938,12 @@ class Arkitekt(
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
+
+    /**
+     * True if a granted config for [url] is already cached, so a login can proceed silently
+     * (no device-code browser flow). Used to gate auto-login on launch.
+     */
+    fun hasCachedConfig(url: String): Boolean = cache.load(cacheHash(url)) != null
 
     suspend fun loginUser(unlok: AuthFakt): String {
         val tokenUrl = unlok.token_url
@@ -986,20 +1050,23 @@ class Arkitekt(
         }
     }
 
-    // 2. Demand (interactive device code) — POST {base}start/ then poll {base}challenge/.
+    // 2. Demand (interactive device code) — POST the start URL then poll the challenge URL.
     //    Returns the claim token once the user approves in the browser.
-    suspend fun demand(base: String, configureUrl: String): String {
-        // start/ -> device code
+    //    `configureUrl` may contain a `{code}` placeholder; otherwise the code is appended.
+    suspend fun demand(startUrl: String, challengeUrl: String, configureUrl: String): String {
+        // start -> device code
         val startBody = faktsJson.encodeToString(StartRequest(manifest = manifest))
-        val startText = postJson("${base}start/", startBody)
+        val startText = postJson(startUrl, startBody)
         val start = faktsJson.decodeFromString<StartResponse>(startText)
         if (start.status != "granted" || start.code == null) {
-            throw DemandError("start/ refused: ${start.error ?: start.status}")
+            throw DemandError("start refused: ${start.error ?: start.status}")
         }
         val code = start.code
 
-        // Open the browser for one-time consent: {configure_url}{code}
-        val deviceUrl = "$configureUrl$code"
+        // Open the browser for one-time consent. Substitute `{code}` if present, else append.
+        val deviceUrl =
+                if (configureUrl.contains("{code}")) configureUrl.replace("{code}", code)
+                else "$configureUrl$code"
         val osName = System.getProperty("os.name").lowercase()
         try {
             when {
@@ -1015,15 +1082,15 @@ class Arkitekt(
         }
         println("Waiting for approval at: $deviceUrl")
 
-        // Poll challenge/ once per second until the code's expiration window elapses.
+        // Poll the challenge URL once per second until the code's expiration window elapses.
         val challengeBody = faktsJson.encodeToString(ChallengeRequest(code))
         repeat(300) {
             delay(1000)
             val text =
                     try {
-                        postJson("${base}challenge/", challengeBody)
+                        postJson(challengeUrl, challengeBody)
                     } catch (e: Exception) {
-                        println("challenge/ poll failed, retrying: ${e.message}")
+                        println("challenge poll failed, retrying: ${e.message}")
                         return@repeat
                     }
             val answer = faktsJson.decodeFromString<ChallengeResponse>(text)
@@ -1039,10 +1106,10 @@ class Arkitekt(
         throw DemandError("Device code expired before it was approved.")
     }
 
-    // 3. Claim — POST {base}claim/ exchanges the claim token for the ActiveFakts config.
-    suspend fun claim(base: String, token: String, secure: Boolean): ActiveFakts {
+    // 3. Claim — POST the claim URL to exchange the claim token for the ActiveFakts config.
+    suspend fun claim(claimUrl: String, token: String, secure: Boolean): ActiveFakts {
         val claimBody = faktsJson.encodeToString(ClaimRequest(token = token, secure = secure))
-        val text = postJson("${base}claim/", claimBody)
+        val text = postJson(claimUrl, claimBody)
         val response = faktsJson.decodeFromString<ClaimResponse>(text)
         if (response.status != "granted" || response.config == null) {
             throw ClaimError("claim/ refused: ${response.error ?: response.status}")
@@ -1056,10 +1123,15 @@ class Arkitekt(
         val base = (endpoint.base_url ?: (url.trimEnd('/') + "/")).let {
             if (it.endsWith("/")) it else "$it/"
         }
-        val configureUrl = endpoint.configure_url ?: "${base}configure/"
+        // Prefer the new-style fully-qualified endpoint URLs; fall back to deriving them
+        // from `base_url` (and the legacy `configure_url`/`claim_url` fields) otherwise.
+        val startUrl = endpoint.device_code_start ?: "${base}start/"
+        val challengeUrl = endpoint.challenge_url ?: "${base}challenge/"
+        val configureUrl = endpoint.configure ?: endpoint.configure_url ?: "${base}configure/"
+        val claimUrl = endpoint.claim ?: endpoint.claim_url ?: "${base}claim/"
         val secure = url.startsWith("https")
-        val token = demand(base, configureUrl)
-        return claim(base, token, secure)
+        val token = demand(startUrl, challengeUrl, configureUrl)
+        return claim(claimUrl, token, secure)
     }
 
     // Cache-first config loading. Returns (config, fromCache); fromCache enables self-healing.
@@ -1079,15 +1151,34 @@ class Arkitekt(
             onSuccess: (MeQuery.Data) -> Unit,
             onError: (Throwable) -> Unit = {}
     ) {
-        CoroutineScope(Dispatchers.Default).launch {
+        // Cancel any in-flight attempt before starting a new one (e.g. rapid Re-Login).
+        loginJob?.cancel()
+        ArkitektState.setState(ConnState.Connecting)
+        loginJob = CoroutineScope(Dispatchers.Default).launch {
             try {
                 val result = alogin(url)
+                ArkitektState.setState(ConnState.Connected(result.me.username))
                 withContext(Dispatchers.Main) { onSuccess(result) }
+            } catch (e: CancellationException) {
+                // Cancelled by the user (clicked the button mid-challenge); state is set to
+                // Disconnected by cancelLogin(), so don't surface this as an error.
+                throw e
             } catch (e: Exception) {
                 println("Failed to login: ${e}")
+                ArkitektState.setState(ConnState.Error(e.message ?: e.toString()))
                 withContext(Dispatchers.Main) { onError(e) }
             }
         }
+    }
+
+    /**
+     * Cancel an in-flight login (the device-code challenge poll). Safe to call when nothing is
+     * running. Resets the shared state to Disconnected.
+     */
+    fun cancelLogin() {
+        loginJob?.cancel()
+        loginJob = null
+        ArkitektState.setState(ConnState.Disconnected)
     }
 
     // Port of mikro_next `rechunk` (mikro_next/utils.py): aim for ~20 MB chunks given the
@@ -1224,6 +1315,32 @@ class Arkitekt(
 
         return mapOf(Pair("image", structureReturn("@mikro/image", imageId)))
 
+    }
+
+    // Download an image, run an arbitrary ImageJ macro over it (image in -> image out), and upload
+    // the result as a new @mikro/image. The macro sees the downloaded image as the IJ1 "current
+    // image" and typically transforms it in place (e.g. run("Gaussian Blur...", "sigma=2")).
+    suspend fun runImageToImageMacro(app: App, args: Map<String, JsonElement?>): Map<String, JsonElement?> {
+
+        val imageId = structureArgId(args["image"])
+        val macro = args["macro"]?.jsonPrimitive?.contentOrNull
+                ?: throw IllegalArgumentException("Missing 'macro' argument")
+        val name = args["name"]?.jsonPrimitive?.contentOrNull ?: "Macro result"
+
+        // 1. Download the input image as a Dataset (same access path as loadImage).
+        val response = app.mikro.getClient().query(GetImageQuery(id = imageId)).execute()
+        val data = response.data ?: throw Exception("Failed to retrieve image $imageId")
+        val store = app.datalayer.requestAccess(data.image.store.id)
+        val inputDataset = loadArrayAsDataset(app, store, data.image.name)
+
+        // 2. Run the macro (needs the IJ1 legacy layer; see runMacroOnDataset).
+        val outputDataset = runMacroOnDataset(app, inputDataset, macro)
+
+        // 3. Upload the transformed image as a new @mikro/image.
+        val array = imgPlusToCTZYXUcarArray(outputDataset.imgPlus)
+        val image = uploadArray(app, array, name)
+
+        return mapOf(Pair("image", structureReturn("@mikro/image", image.id)))
     }
 
     suspend fun alogin(url: String): MeQuery.Data {
@@ -1404,6 +1521,74 @@ class Arkitekt(
             ::loadImage
         )
 
+        registry.register_function(
+            "run_image_to_image_macro",
+            DefinitionInput(
+                key = "run_image_to_image_macro",
+                version = "0.1.0",
+                name = "Run Image-To-Image Macro",
+                description =
+                    Optional.present(
+                        "Run an arbitrary ImageJ macro over an image and return the result as a new image."
+                    ),
+                args =
+                    Optional.present(
+                        listOf(
+                            ArgPortInput(
+                                key = "image",
+                                kind = PortKind.STRUCTURE,
+                                identifier =
+                                    Optional.present(
+                                        "@mikro/image"
+                                    ),
+                                description =
+                                    Optional.present(
+                                        "The image to run the macro on"
+                                    ),
+                                nullable = Optional.present(false)
+                            ),
+                            ArgPortInput(
+                                key = "macro",
+                                kind = PortKind.STRING,
+                                description =
+                                    Optional.present(
+                                        "The ImageJ macro to run. It operates on the image as the current image, e.g. run(\"Gaussian Blur...\", \"sigma=2\")."
+                                    ),
+                                nullable = Optional.present(false)
+                            ),
+                            ArgPortInput(
+                                key = "name",
+                                kind = PortKind.STRING,
+                                description =
+                                    Optional.present(
+                                        "How would you like to name the resulting image?"
+                                    ),
+                                nullable = Optional.present(true)
+                            )
+                        )
+                    ),
+                returns =
+                    Optional.present(
+                        listOf(
+                            ReturnPortInput(
+                                key = "image",
+                                kind = PortKind.STRUCTURE,
+                                identifier =
+                                    Optional.present(
+                                        "@mikro/image"
+                                    ),
+                                description =
+                                    Optional.present(
+                                        "The resulting image after running the macro"
+                                    )
+                            )
+                        )
+                    ),
+                kind = ActionKind.FUNCTION
+            ),
+            ::runImageToImageMacro
+        )
+
 
         var agent = Agent(rekuest, instanceMap["rekuest"]!!, token, registry, app)
 
@@ -1420,13 +1605,16 @@ class Arkitekt(
     }
 
     fun logout() {
-        // Tear down the live agent connection (WebSocket provide loop), if any.
+        // Tear down the live agent connection (WebSocket provide loop) and any in-flight login.
         provideJob?.cancel()
         provideJob = null
+        loginJob?.cancel()
+        loginJob = null
         // Clear the cached configuration so the next login re-negotiates from scratch.
         cache.clear()
         // Remove the legacy token key written by older versions of this plugin.
         val prefs = Preferences.userNodeForPackage(Arkitekt::class.java)
         prefs.remove("token")
+        ArkitektState.setState(ConnState.Disconnected)
     }
 }

@@ -65,17 +65,29 @@ import javax.swing.JDialog
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JTextField
+import javax.swing.SwingUtilities
 import javax.swing.border.EmptyBorder
 
 
 fun main() {
+    // Patch the IJ1 legacy layer (inject ij.IJ's `_hooks` field) BEFORE the ImageJ2 context builds
+    // LegacyService. Standalone (`./gradlew run`) nothing does this the way Fiji's launcher does, so
+    // without it LegacyService.<clinit> dies with "No _hooks field found in ij.IJ". Must run before
+    // any IJ1 class loads. Requires `--add-opens java.base/java.lang=ALL-UNNAMED` (set in the run
+    // task) so the patcher can reflect into ClassLoader on JDK 9+.
+    // Reflective so the class isn't required when imagej-legacy is absent (it is compileOnly for the
+    // Fiji build, which never calls main()).
+    try {
+        Class.forName("net.imagej.patcher.LegacyInjector").getMethod("preinit").invoke(null)
+    } catch (e: ClassNotFoundException) {
+        // imagej-legacy not on the classpath — boot anyway; the macro action just won't work.
+    }
     // create the ImageJ application context with all available services
     val ij = ImageJ()
-    // show the image
+    // Launch the UI. The Arkitekt toolbar button (ArkitektTool) is the primary entry point and
+    // appears automatically; we intentionally do NOT open the login dialog here. The menu item
+    // (Plugins > Arkitekt) remains available as a fallback.
     ij.launch()
-
-    // invoke the plugin
-    ij.command().run(ArkitektCommand::class.java, true)
 }
 
 class Dialog : JDialog {
@@ -161,9 +173,15 @@ class Dialog : JDialog {
         root.add(buttons, BorderLayout.SOUTH)
 
         // --- State transitions ---
+        // Tracks whether the previous login attempt failed, so the login button offers a
+        // "Re-Login" that first discards the (possibly stale) cached configuration.
+        var loginFailed = false
+
         fun showLoggedOut() {
+            loginFailed = false
             serverInput.isEnabled = true
             loginButton.isEnabled = true
+            loginButton.text = "Log in"
             logoutButton.isEnabled = false
             status.text = "Not connected"
             status.foreground = MUTED
@@ -178,36 +196,57 @@ class Dialog : JDialog {
         }
 
         fun showConnected(username: String) {
+            loginFailed = false
             serverInput.isEnabled = false
             loginButton.isEnabled = false
+            loginButton.text = "Log in"
             logoutButton.isEnabled = true
             status.text = "Connected as $username"
             status.foreground = SUCCESS
         }
 
         fun showError(message: String) {
+            loginFailed = true
             serverInput.isEnabled = true
             loginButton.isEnabled = true
+            loginButton.text = "Re-Login"
             logoutButton.isEnabled = false
             status.text = "<html>Login failed: ${message.take(120)}</html>"
             status.foreground = ERROR
         }
 
-        showLoggedOut()
+        // Drive the labels off the shared connection state so the dialog and the toolbar
+        // button always agree, and so changes made elsewhere (e.g. the tool's auto-login on
+        // launch) are reflected when the dialog opens. addListener replays the current state.
+        val stateListener: (ConnState) -> Unit = { state ->
+            SwingUtilities.invokeLater {
+                when (state) {
+                    is ConnState.Connected -> showConnected(state.username)
+                    is ConnState.Connecting -> showConnecting()
+                    is ConnState.Error -> showError(state.message)
+                    ConnState.Disconnected -> showLoggedOut()
+                }
+            }
+        }
+        ArkitektState.addListener(stateListener)
+        addWindowListener(object : java.awt.event.WindowAdapter() {
+            override fun windowClosed(e: java.awt.event.WindowEvent?) {
+                ArkitektState.removeListener(stateListener)
+            }
+        })
 
         loginButton.addActionListener {
             val serverUrl = serverInput.text.trim().ifEmpty { DEFAULT_SERVER }
-            showConnecting()
-            arkitekt.login(
-                serverUrl,
-                { data -> showConnected(data.me.username) },
-                { error -> showError(error.message ?: error.toString()) }
-            )
+            // After a failure, a Re-Login clears the cached (stale) configuration so the
+            // next attempt re-negotiates from scratch. The stateListener updates the labels.
+            if (loginFailed) {
+                arkitekt.logout()
+            }
+            arkitekt.login(serverUrl, {}, {})
         }
 
         logoutButton.addActionListener {
             arkitekt.logout()
-            showLoggedOut()
         }
 
         pack()
@@ -281,7 +320,9 @@ open class ArkitektCommand<T : RealType<T>> : Command {
 
 
 
-            var dialog = Dialog(context, Arkitekt(uiService!!, datasetService!!, imageDisplayService!!))
+            // Share the single orchestrator with the toolbar tool (ArkitektTool) via ArkitektState.
+            val arkitekt = ArkitektState.getOrCreate(uiService!!, datasetService!!, imageDisplayService!!)
+            var dialog = Dialog(context, arkitekt)
             dialog.isVisible = true
         }
     }

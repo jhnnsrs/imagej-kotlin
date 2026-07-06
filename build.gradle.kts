@@ -13,6 +13,32 @@ application {
     mainClass.set("com.mycompany.arkitekt.ArkitektCommandKt")
 }
 
+// Put the IJ1 legacy layer on the classpath for `./gradlew run` so the "Run Image-To-Image Macro"
+// action works standalone. This deliberately targets only the `run` task, not runtimeClasspath,
+// so the plugin bundle stays free of a second IJ1 copy (which Fiji already provides).
+//
+// imagej-legacy needs ij1-patcher to inject ij.IJ's `_hooks` field before ImageJ2 boots
+// LegacyService (else: "No _hooks field found in ij.IJ"). main() calls LegacyInjector.preinit()
+// first (see ArkitektCommand.kt) to do this in-process. But on JDK 9+ the patcher reflects into
+// java.lang.ClassLoader — findLoadedClass (to see if ij.IJ is already loaded) AND defineClass (to
+// install the patched ij.IJ) — both via setAccessible(true). Without opening java.base/java.lang,
+// those InaccessibleObjectException-fail silently, the patcher falls back to loading ij.IJ
+// UNPATCHED, and boot dies. This add-opens is what makes standalone preinit work.
+tasks.named<JavaExec>("run") {
+    classpath += configurations["ij1Runtime"]
+    jvmArgs("--add-opens", "java.base/java.lang=ALL-UNNAMED")
+}
+
+// Headless verification of the standalone macro path (see MacroSmokeTest.kt). Same classpath and
+// add-opens as `run`, but runs to completion (no UI) and exits non-zero on failure.
+tasks.register<JavaExec>("macroSmokeTest") {
+    group = "verification"
+    description = "Headless smoke test of the IJ1-legacy Dataset<->ImagePlus + runMacro path"
+    classpath = sourceSets["main"].runtimeClasspath + configurations["ij1Runtime"]
+    mainClass.set("com.mycompany.arkitekt.MacroSmokeTestKt")
+    jvmArgs("--add-opens", "java.base/java.lang=ALL-UNNAMED", "-Djava.awt.headless=true")
+}
+
 group = "com.mycompany"
 version = "0.1.0-SNAPSHOT"
 
@@ -28,9 +54,25 @@ repositories {
     maven("https://maven.scijava.org/content/groups/public")
 }
 
+// IJ1 legacy layer for `./gradlew run` only — kept off runtimeClasspath so it is not bundled
+// into the Fiji plugin (see the ij1Runtime dependency note below).
+val ij1Runtime by configurations.creating
+
 dependencies {
     kapt("net.imagej:imagej:2.16.0")
     implementation("net.imagej:imagej:2.16.0")
+    // IJ1 legacy layer — provides `ij.IJ.runMacro` (the ImageJ macro engine) and the
+    // Dataset<->ImagePlus converters used by the "Run Image-To-Image Macro" action.
+    // compileOnly on purpose: Fiji already ships ij + imagej-legacy in its jars/ dir, and
+    // bundling a second copy would double-load IJ1's singletons (ij.IJ / WindowManager) and
+    // break the plugin. So we compile against it but let Fiji provide it at runtime. (Version
+    // matches Fiji's imagej-legacy-1.2.0.jar; the transitive `net.imagej:ij` comes with it.)
+    compileOnly("net.imagej:imagej-legacy:1.2.0")
+    // Same artifact, runtime-only, but on a SEPARATE configuration (see `ij1Runtime` below) so it
+    // is on the classpath for `./gradlew run` (lets the macro action work standalone) WITHOUT
+    // leaking into runtimeClasspath — which installToImageJ/buildPlugin bundle into Fiji, where a
+    // second IJ1 copy would double-load ij.IJ/WindowManager singletons and break the plugin.
+    ij1Runtime("net.imagej:imagej-legacy:1.2.0")
     implementation("dev.zarr:zarr-java:0.0.5-SNAPSHOT")
     implementation("com.apollographql.apollo:apollo-runtime:4.0.0")
     implementation("com.google.code.gson:gson:2.11.0")
