@@ -73,7 +73,9 @@ dependencies {
     // leaking into runtimeClasspath — which installToImageJ/buildPlugin bundle into Fiji, where a
     // second IJ1 copy would double-load ij.IJ/WindowManager singletons and break the plugin.
     ij1Runtime("net.imagej:imagej-legacy:1.2.0")
-    implementation("dev.zarr:zarr-java:0.0.5-SNAPSHOT")
+    // Vendored in-repo Gradle subproject (see settings.gradle.kts + zarr-java/build.gradle.kts).
+    // Replaces the old mavenLocal coordinate "dev.zarr:zarr-java:0.0.5-SNAPSHOT" (`mvn install`).
+    implementation(project(":zarr-java"))
     implementation("com.apollographql.apollo:apollo-runtime:4.0.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing")

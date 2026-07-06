@@ -43,17 +43,22 @@ even though the toolchain/run JVM is 17 — don't introduce APIs above Java 8 in
 `installToImageJ` contains a hard-coded path to the author's Fiji install — adjust the
 `doLast` block in `build.gradle.kts` before using it on another machine.
 
-### Local dependencies
-- `dev.zarr:zarr-java:0.0.5-SNAPSHOT` — the Zarr reader/writer, resolved from **mavenLocal** (the
-  `repositories { mavenLocal() }` in `build.gradle.kts`). The `libs/…jar` copy is vestigial — the
-  build classpath and the `installToImageJ`/`buildPlugin` bundles both come from `runtimeClasspath`,
-  i.e. mavenLocal.
-- The source checkout is `zarr-java/` (Maven; **its `pom.xml` version is pinned to `0.0.5-SNAPSHOT`**
-  to match the coordinate above even though the code is upstream 0.1.3). Rebuild + reinstall with:
-  `cd zarr-java && JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 mvn -DskipTests -Dgpg.skip=true install`
-  (gpg.skip avoids a signing failure; the build also produces a `-shaded` jar that the project does
-  **not** use). This zarr-java is on **AWS SDK v2** (`software.amazon.awssdk:s3`); its `S3Store` takes
-  a v2 `S3Client`, so `Datalayer` builds the client with `S3Client.builder()…forcePathStyle(true)`.
+### zarr-java (vendored in-repo Gradle subproject)
+- `zarr-java/` is **vendored into this repo** — a fork of upstream `zarr-developers/zarr-java`
+  (code is upstream 0.1.3), tracked in this repo's history. It is a **Gradle subproject**
+  (`include(":zarr-java")` in `settings.gradle.kts`; its `zarr-java/build.gradle.kts` translates the
+  Maven `pom.xml`), consumed by the root via `implementation(project(":zarr-java"))`. So plain
+  `./gradlew build` compiles it — **no more `mvn install` into mavenLocal** and no `libs/…jar` shuffle.
+  The subproject's Maven-`compile`-scope deps are declared `api` so they stay on the plugin's
+  classpath and in the `installToImageJ`/`buildPlugin` bundle (both come from `runtimeClasspath`).
+- The `pom.xml` is retained **only** for independent Maven Central publishing (shade/gpg/central
+  plugins); it is *not* used by `./gradlew build`. Its version stays pinned to `0.0.5-SNAPSHOT`.
+  zarr-java's own tests are disabled in the Gradle build (they need Docker/S3/testcontainers) — run
+  them via Maven if needed.
+- This zarr-java is on **AWS SDK v2** (`software.amazon.awssdk:s3`); its `S3Store` takes a v2
+  `S3Client`, so `Datalayer` builds the client with `S3Client.builder()…forcePathStyle(true)`.
+  The subproject api-exports s3 `2.34.6` and the root also imports the awssdk BOM `2.32.8` — Gradle
+  resolves the classpath to the higher `2.34.6` (both v2, API-compatible).
 - Local patch in `zarr-java/`: v3 `BytesCodec` accepts a `bytes` codec with **no `configuration`**
   (legitimate for single-byte dtypes) — the `@JsonCreator` arg is nullable and `getByteOrder()`
   defaults to little-endian. Without it, reading server-written `uint8` arrays fails at parse time.
