@@ -13,7 +13,6 @@ import com.apollographql.apollo.api.http.HttpRequest
 import com.apollographql.apollo.api.http.HttpResponse
 import com.apollographql.apollo.network.http.HttpInterceptor
 import com.apollographql.apollo.network.http.HttpInterceptorChain
-import com.google.gson.Gson
 import com.mycompany.lok.graphql.MeQuery
 import com.mycompany.mikro.graphql.FromArrayLikeMutation
 import com.mycompany.mikro.graphql.GetImageQuery
@@ -107,266 +106,6 @@ class ErrorLoggingInterceptor : ApolloInterceptor {
 }
 
 
-// Shared lenient JSON for all fakts negotiation payloads. `encodeDefaults` keeps the
-// protocol's optional-with-defaults fields on the wire; `ignoreUnknownKeys` makes the
-// client forward-compatible with newer servers.
-val faktsJson = Json {
-    ignoreUnknownKeys = true
-    encodeDefaults = true
-}
-
-// ---- Manifest (the app's identity card) -------------------------------------------------
-
-@Serializable
-data class Requirement(
-        val key: String,
-        val service: String,
-        val optional: Boolean = false,
-        val description: String? = null
-)
-
-@Serializable
-data class Manifest(
-        val identifier: String,
-        val version: String = "1.0",
-        val scopes: List<String> = listOf("openid"),
-        val requirements: List<Requirement> = emptyList(),
-        val logo: String? = null,
-        val description: String? = null,
-        val node_id: String? = null,
-        val public_sources: List<String> = emptyList()
-)
-
-// ---- Discovery: GET {url}/.well-known/fakts ---------------------------------------------
-
-@Serializable
-data class FaktsLayer(
-        val identifier: String,
-        val kind: String,
-        val dns_probe: String? = null,
-        val get_probe: String? = null
-)
-
-@Serializable
-data class FaktsEndpoint(
-        val name: String,
-        val base_url: String? = null,
-        val version: String? = null,
-        val protocol_version: String? = null,
-        val description: String? = null,
-        val frontend_url: String? = null,
-        // New-style: explicit, fully-qualified endpoint URLs. `configure` carries a
-        // `{code}` placeholder that must be substituted with the device code.
-        val claim: String? = null,
-        val configure: String? = null,
-        val device_code_start: String? = null,
-        val challenge_url: String? = null,
-        // Legacy-style fields (older coordination servers). Kept for backwards compat;
-        // the corresponding URLs are derived from `base_url` when absent.
-        val configure_url: String? = null,
-        val claim_url: String? = null,
-        val retrieve_url: String? = null,
-        val ca_crt: String? = null,
-        val layers: List<FaktsLayer> = emptyList()
-)
-
-// ---- Demand: POST {base}start/ + {base}challenge/ ---------------------------------------
-
-@Serializable
-data class StartRequest(
-        val manifest: Manifest,
-        val expiration_time_seconds: Int = 300,
-        val redirect_uris: List<String> = emptyList(),
-        val requested_client_kind: String = "development",
-        val supported_layers: List<String> = emptyList()
-)
-
-// The negotiation endpoints share a `status` envelope plus status-specific fields.
-@Serializable
-data class StartResponse(val status: String, val code: String? = null, val error: String? = null)
-
-@Serializable data class ChallengeRequest(val code: String)
-
-@Serializable
-data class ChallengeResponse(
-        val status: String,
-        val token: String? = null,
-        val message: String? = null,
-        val error: String? = null
-)
-
-// ---- Claim: POST {base}claim/ -----------------------------------------------------------
-
-@Serializable data class ClaimRequest(val token: String, val secure: Boolean)
-
-@Serializable
-data class ClaimResponse(
-        val status: String,
-        val config: ActiveFakts? = null,
-        val error: String? = null
-)
-
-@Serializable
-data class AuthFakt(
-        public val client_id: String,
-        public val client_secret: String,
-        public val client_token: String? = null,
-        public val token_url: String,
-        public val report_url: String? = null,
-        public val scopes: List<String> = emptyList()
-)
-
-
-@Serializable
-data class Alias(
-        val id: String? = null,
-        val host: String,
-        val port: Int? = null,
-        val ssl: Boolean,
-        val path: String? = null,
-        val challenge: String
-) {
-    public fun to_http_path(append: String?): String {
-        val protocol = if (ssl) "https" else "http"
-        val portPart = when (port) {
-            null, 80, 443 -> ""
-            else -> ":$port"
-        }
-        val pathPart = path?.let { "/$it" } ?: ""
-        val appendPart = append?.let {
-            if (it.startsWith("/")) it else "/$it"
-        } ?: ""
-
-        return "$protocol://$host$portPart$pathPart$appendPart"
-    }
-
-    public fun to_ws_path(append: String?): String {
-
-        val protocol = if (ssl) "wss" else "ws"
-        val portPart = when (port) {
-            null, 80, 443 -> ""
-            else -> ":$port"
-        }
-        val pathPart = path?.let { "/$it" } ?: ""
-        val appendPart = append?.let {
-            if (it.startsWith("/")) it else "/$it"
-        } ?: ""
-
-        return "$protocol://$host$portPart$pathPart$appendPart"
-
-    }
-
-}
-
-
-
-// ---- ActiveFakts: what the server grants ------------------------------------------------
-
-@Serializable
-data class Instance(val service: String, val identifier: String, val aliases: List<Alias>)
-
-@Serializable
-data class SelfFakt(val deployment_name: String, val alias: Alias)
-
-@Serializable
-data class ActiveFakts(
-        val self: SelfFakt,
-        val auth: AuthFakt,
-        val instances: Map<String, Instance>,
-        val statuses: Map<String, String> = emptyMap()
-)
-
-// Outcome of a single requirement; unrecognized server values coerce to UNKNOWN.
-enum class GrantStatus {
-    GRANTED,
-    DENIED,
-    UNAVAILABLE,
-    UNKNOWN;
-
-    companion object {
-        fun from(value: String?): GrantStatus = when (value?.lowercase()) {
-            "granted" -> GRANTED
-            "denied" -> DENIED
-            "unavailable" -> UNAVAILABLE
-            else -> UNKNOWN
-        }
-    }
-}
-
-@Serializable
-data class TokenResponse(
-        val access_token: String,
-        val token_type: String,
-        val scope: String,
-        val expires_in: String
-)
-
-// ---- Errors -----------------------------------------------------------------------------
-
-open class FaktsError(message: String) : Exception(message)
-
-class DiscoveryError(message: String) : FaktsError(message)
-
-class DemandError(message: String) : FaktsError(message)
-
-class ClaimError(message: String) : FaktsError(message)
-
-// Raised when the OAuth2 token exchange fails. Carries the HTTP status (or null for a
-// transport-level failure) so callers can react to e.g. a 400 (stale client creds) by
-// re-negotiating from scratch.
-class TokenError(val statusCode: Int?, message: String) : FaktsError(message)
-
-// Raised when a *required* service could not be resolved to a working, granted alias.
-class CompositionError(message: String) : FaktsError(message)
-
-// ---- Cache: the granted ActiveFakts, keyed to a hash of manifest + server url ----------
-
-@Serializable
-data class CachedFakts(val hash: String, val config: ActiveFakts)
-
-class FaktsCache(private val file: File) {
-    fun load(hash: String): ActiveFakts? {
-        return try {
-            if (!file.exists()) return null
-            val cached = faktsJson.decodeFromString<CachedFakts>(file.readText())
-            // A changed manifest or server url changes the hash and invalidates the cache.
-            if (cached.hash == hash) cached.config else null
-        } catch (e: Exception) {
-            println("Failed to read fakts cache: ${e.message}")
-            null
-        }
-    }
-
-    fun save(hash: String, config: ActiveFakts) {
-        try {
-            file.parentFile?.mkdirs()
-            file.writeText(faktsJson.encodeToString(CachedFakts(hash, config)))
-        } catch (e: Exception) {
-            println("Failed to write fakts cache: ${e.message}")
-        }
-    }
-
-    fun clear() {
-        try {
-            file.delete()
-        } catch (e: Exception) {
-            println("Failed to clear fakts cache: ${e.message}")
-        }
-    }
-}
-
-class AuthorizationInterceptor(val token: String) : HttpInterceptor {
-    override suspend fun intercept(
-            request: HttpRequest,
-            chain: HttpInterceptorChain
-    ): HttpResponse {
-        return chain.proceed(
-                request.newBuilder().addHeader("Authorization", "Bearer $token").build()
-        )
-    }
-}
-
-
 class LogInterceptor(val service_name: String) : HttpInterceptor {
     override suspend fun intercept(
         request: HttpRequest,
@@ -390,12 +129,13 @@ class LogInterceptor(val service_name: String) : HttpInterceptor {
 
 
 
-class Unlok(alias: Alias, token: String) {
+class Unlok(alias: Alias, tokens: TokenManager) {
     private val apolloClient: ApolloClient =
             ApolloClient.Builder()
                     .serverUrl(alias.to_http_path("graphql"))
-                    .addHttpInterceptor(AuthorizationInterceptor(token))
+                    .addHttpInterceptor(AuthorizationInterceptor { tokens.accessToken() })
                 .addHttpInterceptor(LogInterceptor("unlok"))
+                .addInterceptor(AuthRetryInterceptor(tokens))
                     .build()
 
     fun getClient(): ApolloClient {
@@ -426,56 +166,6 @@ class DatalayerStore(store: S3Store, storeId: String) {
     val store = store
     val storeId = storeId
 }
-
-// Challenge each alias of a service (GET on its challenge URL must answer 200 iff reachable)
-// and keep the first that answers.
-suspend fun getFirstReachableAlias(instance: Instance): Alias? {
-    val client = OkHttpClient()
-
-    for (alias in instance.aliases) {
-        val url = alias.to_http_path(alias.challenge)
-        val isReachable = try {
-            // Execute HTTP request in IO context
-            withContext(Dispatchers.IO) {
-                val request = Request.Builder().url(url).get().build()
-                val response = client.newCall(request).execute()
-                response.use { it.isSuccessful }
-            }
-        } catch (e: Exception) {
-            println("Couldn't reach alias at ${alias.to_http_path(alias.challenge)}")
-            false // If exception occurs, alias is not reachable
-        }
-
-        if (isReachable) {
-            return alias // Return immediately if an alias is reachable
-        }
-    }
-
-    return null // Return null if no alias is reachable
-}
-
-// Resolve every granted instance to its first reachable alias.
-suspend fun buildInstanceMap(fakts: ActiveFakts): Map<String, Alias> {
-
-    val instanceMap = mutableMapOf<String, Alias>()
-
-    fakts.instances.forEach { (instanceName, instance) ->
-        val alias = getFirstReachableAlias(instance)
-        if (alias != null) {
-            instanceMap[instanceName] = alias
-        }
-        else {
-            println("No reachable alias found for instance $instanceName")
-        }
-    }
-
-    return instanceMap
-}
-
-
-
-
-
 
 class Datalayer(alias: Alias, mikro: Mikro) {
     private var mikro = mikro
@@ -579,12 +269,13 @@ class Datalayer(alias: Alias, mikro: Mikro) {
 
 }
 
-class Mikro(alias: Alias, token: String) {
+class Mikro(alias: Alias, tokens: TokenManager) {
     private val apolloClient: ApolloClient =
             ApolloClient.Builder()
                     .serverUrl(alias.to_http_path("graphql"))
-                    .addHttpInterceptor(AuthorizationInterceptor(token))
+                    .addHttpInterceptor(AuthorizationInterceptor { tokens.accessToken() })
                 .addHttpInterceptor(LogInterceptor("mikro"))
+                .addInterceptor(AuthRetryInterceptor(tokens))
                 .addInterceptor(ErrorLoggingInterceptor())
                     .build()
 
@@ -593,12 +284,13 @@ class Mikro(alias: Alias, token: String) {
     }
 }
 
-class Rekuest(alias: Alias, token: String) {
+class Rekuest(alias: Alias, tokens: TokenManager) {
     private val apolloClient: ApolloClient =
             ApolloClient.Builder()
                     .serverUrl(alias.to_http_path("graphql"))
-                    .addHttpInterceptor(AuthorizationInterceptor(token))
+                    .addHttpInterceptor(AuthorizationInterceptor { tokens.accessToken() })
                 .addHttpInterceptor(LogInterceptor("rekuest"))
+                .addInterceptor(AuthRetryInterceptor(tokens))
                 .addInterceptor(ErrorLoggingInterceptor())
                 .build()
 
@@ -903,7 +595,6 @@ class Arkitekt(
         private val imageDisplayService: ImageDisplayService
 ) {
     private val client = OkHttpClient()
-    private val gson = Gson()
 
     // The background coroutine running the agent's provide loop (WebSocket to /agi).
     // Tracked so logout() can tear the connection down.
@@ -933,140 +624,37 @@ class Arkitekt(
 
     private val cache = FaktsCache(File(System.getProperty("user.home"), ".arkitekt/fakts_cache.json"))
 
+    // The "v2:" prefix binds the key to the protocol generation, so a protocol-1 record can
+    // never be mistaken for a protocol-2 one even if the manifest and url are unchanged.
     private fun cacheHash(url: String): String {
-        val raw = faktsJson.encodeToString(manifest) + "|" + url
+        val raw = "v2:" + faktsJson.encodeToString(manifest) + "|" + url
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
 
     /**
-     * True if a granted config for [url] is already cached, so a login can proceed silently
-     * (no device-code browser flow). Used to gate auto-login on launch.
+     * True if a login for [url] can proceed silently, without the device-code browser flow.
+     *
+     * Under protocol 2 that is not "do I have a config" but "do I hold a refresh token": the
+     * config alone is inert, because there are no client credentials left to mint a token from.
      */
-    fun hasCachedConfig(url: String): Boolean = cache.load(cacheHash(url)) != null
+    fun hasCachedConfig(url: String): Boolean =
+            cache.load(cacheHash(url))?.token?.refresh_token != null
 
-    suspend fun loginUser(unlok: AuthFakt): String {
-        val tokenUrl = unlok.token_url
-        val bodyString =
-                "grant_type=client_credentials&client_id=${unlok.client_id}&client_secret=${unlok.client_secret}"
-        val body =
-                bodyString.toRequestBody(
-                        "application/x-www-form-urlencoded; charset=utf-8".toMediaTypeOrNull()
+    // The protocol driver lives in Fakts.kt; this class only sequences it and owns the cache.
+    private val fakts = FaktsClient(client)
+
+    // Open the approval page. `verification_uri_complete` already has the user code substituted;
+    // `verification_uri` still carries the literal `{code}`, so it is only a last-resort fallback
+    // the human has to complete by hand.
+    private fun openApprovalPage(authorization: DeviceAuthorization) {
+        val deviceUrl = authorization.verification_uri_complete
+                ?: authorization.verification_uri?.replace(
+                        "{code}",
+                        authorization.user_code.orEmpty()
                 )
+                ?: throw DemandError("Device authorization carried no verification URI to approve at.")
 
-        val request = Request.Builder().url(tokenUrl).post(body).build()
-
-        // The token endpoint is the OAuth2 client_credentials exchange. When it fails it is
-        // almost always for a reason the server spells out in the response body
-        // (e.g. {"error":"invalid_client","error_description":"..."}), so surface URL,
-        // status line and body verbatim instead of just the bare status code.
-        println("Obtaining token from $tokenUrl (grant_type=client_credentials, client_id=${unlok.client_id})")
-
-        return withContext(Dispatchers.IO) {
-            val response =
-                    try {
-                        client.newCall(request).execute()
-                    } catch (e: Exception) {
-                        // Transport-level failure: DNS, TLS, connection refused, timeout, ...
-                        throw TokenError(
-                                null,
-                                "Token request to $tokenUrl failed before a response was received " +
-                                        "(${e.javaClass.simpleName}: ${e.message}). " +
-                                        "Check that token_url is reachable and the TLS/cert is valid."
-                        )
-                    }
-
-            response.use {
-                val responseBody = response.body?.string().orEmpty()
-
-                if (!response.isSuccessful) {
-                    throw TokenError(
-                            response.code,
-                            "Failed to obtain token from $tokenUrl.\n" +
-                                    "  HTTP status : ${response.code} ${response.message}\n" +
-                                    "  client_id   : ${unlok.client_id}\n" +
-                                    "  scopes      : ${unlok.scopes.joinToString(" ").ifEmpty { "(none)" }}\n" +
-                                    "  response    : ${responseBody.ifBlank { "(empty body)" }}"
-                    )
-                }
-
-                val tokenResponse =
-                        try {
-                            gson.fromJson(responseBody, TokenResponse::class.java)
-                        } catch (e: Exception) {
-                            throw TokenError(
-                                    response.code,
-                                    "Token endpoint $tokenUrl returned HTTP ${response.code} but the body " +
-                                            "could not be parsed as a token response " +
-                                            "(${e.message}).\n  response: ${responseBody.ifBlank { "(empty body)" }}"
-                            )
-                        }
-
-                val accessToken = tokenResponse?.access_token
-                if (accessToken.isNullOrBlank()) {
-                    throw TokenError(
-                            response.code,
-                            "Token endpoint $tokenUrl returned HTTP ${response.code} with no access_token.\n" +
-                                    "  response: ${responseBody.ifBlank { "(empty body)" }}"
-                    )
-                }
-
-                accessToken
-            }
-        }
-    }
-
-    // Helper: POST a JSON body and return the (string) response body, throwing on transport failure.
-    private suspend fun postJson(url: String, json: String): String {
-        val body = json.toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull())
-        val request = Request.Builder().url(url).post(body).build()
-        return withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { response ->
-                val text = response.body?.string() ?: ""
-                if (!response.isSuccessful) {
-                    throw FaktsError("POST $url failed (${response.code}): ${text.take(300)}")
-                }
-                text
-            }
-        }
-    }
-
-    // 1. Discovery — GET {url}/.well-known/fakts
-    suspend fun discover(url: String): FaktsEndpoint {
-        val discoveryUrl = url.trimEnd('/') + "/.well-known/fakts"
-        val request = Request.Builder().url(discoveryUrl).get().build()
-        return withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { response ->
-                val text = response.body?.string() ?: ""
-                if (!response.isSuccessful) {
-                    throw DiscoveryError("Discovery at $discoveryUrl failed (${response.code}): ${text.take(300)}")
-                }
-                try {
-                    faktsJson.decodeFromString<FaktsEndpoint>(text)
-                } catch (e: Exception) {
-                    throw DiscoveryError("Could not parse discovery response from $discoveryUrl: ${e.message}")
-                }
-            }
-        }
-    }
-
-    // 2. Demand (interactive device code) — POST the start URL then poll the challenge URL.
-    //    Returns the claim token once the user approves in the browser.
-    //    `configureUrl` may contain a `{code}` placeholder; otherwise the code is appended.
-    suspend fun demand(startUrl: String, challengeUrl: String, configureUrl: String): String {
-        // start -> device code
-        val startBody = faktsJson.encodeToString(StartRequest(manifest = manifest))
-        val startText = postJson(startUrl, startBody)
-        val start = faktsJson.decodeFromString<StartResponse>(startText)
-        if (start.status != "granted" || start.code == null) {
-            throw DemandError("start refused: ${start.error ?: start.status}")
-        }
-        val code = start.code
-
-        // Open the browser for one-time consent. Substitute `{code}` if present, else append.
-        val deviceUrl =
-                if (configureUrl.contains("{code}")) configureUrl.replace("{code}", code)
-                else "$configureUrl$code"
         val osName = System.getProperty("os.name").lowercase()
         try {
             when {
@@ -1081,68 +669,37 @@ class Arkitekt(
             println("Could not open a browser automatically. Approve the app at: $deviceUrl")
         }
         println("Waiting for approval at: $deviceUrl")
-
-        // Poll the challenge URL once per second until the code's expiration window elapses.
-        val challengeBody = faktsJson.encodeToString(ChallengeRequest(code))
-        repeat(300) {
-            delay(1000)
-            val text =
-                    try {
-                        postJson(challengeUrl, challengeBody)
-                    } catch (e: Exception) {
-                        println("challenge poll failed, retrying: ${e.message}")
-                        return@repeat
-                    }
-            val answer = faktsJson.decodeFromString<ChallengeResponse>(text)
-            when (answer.status) {
-                "granted" ->
-                        return answer.token
-                                ?: throw DemandError("challenge/ granted without a token")
-                "denied" -> throw DemandError("The user declined the app: ${answer.message ?: ""}")
-                "error" -> throw DemandError("challenge/ error: ${answer.error ?: ""}")
-                else -> {} // waiting / pending — keep polling
-            }
-        }
-        throw DemandError("Device code expired before it was approved.")
     }
 
-    // 3. Claim — POST the claim URL to exchange the claim token for the ActiveFakts config.
-    suspend fun claim(claimUrl: String, token: String, secure: Boolean): ActiveFakts {
-        val claimBody = faktsJson.encodeToString(ClaimRequest(token = token, secure = secure))
-        val text = postJson(claimUrl, claimBody)
-        val response = faktsJson.decodeFromString<ClaimResponse>(text)
-        if (response.status != "granted" || response.config == null) {
-            throw ClaimError("claim/ refused: ${response.error ?: response.status}")
-        }
-        return response.config
+    // The full interactive grant: discover -> device authorize -> human approves -> poll.
+    // There is no separate claim step any more; the token response carries the config with it.
+    suspend fun negotiate(url: String): FaktsSession {
+        val endpoint = fakts.discover(url)
+        val authorization = fakts.deviceAuthorize(endpoint, manifest)
+
+        openApprovalPage(authorization)
+
+        val grant =
+                fakts.pollToken(
+                        // The device-auth response re-states the token endpoint; prefer it.
+                        tokenEndpoint = authorization.token_endpoint ?: endpoint.token_endpoint,
+                        deviceCode = authorization.device_code,
+                        clientId = authorization.client_id,
+                        interval = authorization.interval,
+                        expiresIn = authorization.expires_in
+                )
+
+        return FaktsSession(cacheHash(url), endpoint, grant.fakts, grant.token)
     }
 
-    // Full discover -> demand -> claim negotiation against a coordination server url.
-    suspend fun negotiate(url: String): ActiveFakts {
-        val endpoint = discover(url)
-        val base = (endpoint.base_url ?: (url.trimEnd('/') + "/")).let {
-            if (it.endsWith("/")) it else "$it/"
-        }
-        // Prefer the new-style fully-qualified endpoint URLs; fall back to deriving them
-        // from `base_url` (and the legacy `configure_url`/`claim_url` fields) otherwise.
-        val startUrl = endpoint.device_code_start ?: "${base}start/"
-        val challengeUrl = endpoint.challenge_url ?: "${base}challenge/"
-        val configureUrl = endpoint.configure ?: endpoint.configure_url ?: "${base}configure/"
-        val claimUrl = endpoint.claim ?: endpoint.claim_url ?: "${base}claim/"
-        val secure = url.startsWith("https")
-        val token = demand(startUrl, challengeUrl, configureUrl)
-        return claim(claimUrl, token, secure)
-    }
-
-    // Cache-first config loading. Returns (config, fromCache); fromCache enables self-healing.
-    suspend fun getActiveFakts(url: String, forceRefresh: Boolean = false): Pair<ActiveFakts, Boolean> {
-        val hash = cacheHash(url)
+    // Cache-first session loading. Returns (session, fromCache); fromCache enables self-healing.
+    suspend fun getSession(url: String, forceRefresh: Boolean = false): Pair<FaktsSession, Boolean> {
         if (!forceRefresh) {
-            cache.load(hash)?.let { return it to true }
+            cache.load(cacheHash(url))?.let { return it to true }
         }
-        val fakts = negotiate(url)
-        cache.save(hash, fakts)
-        return fakts to false
+        val session = negotiate(url)
+        cache.save(session)
+        return session to false
     }
 
 
@@ -1345,55 +902,52 @@ class Arkitekt(
 
     suspend fun alogin(url: String): MeQuery.Data {
 
-        // Resolve a granted config and exchange it for a token. A 400 from the token endpoint
-        // means the cached client credentials are stale/rejected, so we wipe the cache and run
-        // the full device flow from scratch — but only once, to avoid an approval loop.
+        // Resolve a granted session. A refresh rejected by the server means the cached refresh
+        // chain is dead (revoked, superseded, or simply too old), so wipe the cache and run the
+        // device flow from scratch — but only once, to avoid an approval loop.
         var forceRefresh = false
-        var fakts: ActiveFakts
+        var session: FaktsSession
         var instanceMap: Map<String, Alias>
-        var token: String
+        var tokens: TokenManager
 
         while (true) {
-            // Cache-first: load the granted config, negotiating only on a cache miss
-            // (or when a prior 400 forced a refresh).
-            val loaded = getActiveFakts(url, forceRefresh = forceRefresh)
-            fakts = loaded.first
-            val fromCache = loaded.second
+            // Cache-first: load the granted session, negotiating only on a cache miss (or when a
+            // prior refresh failure forced a re-negotiation).
+            val loaded = getSession(url, forceRefresh = forceRefresh)
+            session = loaded.first
+            var fromCache = loaded.second
 
-            // Every required service must actually have been granted by the server.
-            requiredKeys.forEach { key ->
-                val status = GrantStatus.from(fakts.statuses[key])
-                if (fakts.instances[key] == null ||
-                        status == GrantStatus.DENIED ||
-                        status == GrantStatus.UNAVAILABLE
-                ) {
-                    throw CompositionError("Required service '$key' was not granted (status=$status).")
-                }
-            }
+            // Every required service must have been granted AND resolve to a reachable alias.
+            var (failure, resolved) = compose(session)
+            instanceMap = resolved
 
-            // Resolve each instance to a reachable alias. If a *cached* config has gone stale
-            // (no alias answers), re-negotiate exactly once and retry before failing.
-            instanceMap = buildInstanceMap(fakts)
-            if (fromCache && requiredKeys.any { instanceMap[it] == null }) {
-                println("Cached aliases are unreachable; re-negotiating once.")
+            // A cached session can go stale in two ways — a requirement stops being granted, or
+            // its aliases stop answering — and both are fixed the same way: re-negotiate exactly
+            // once and re-run the whole check before giving up.
+            if (fromCache && failure != null) {
+                println("Cached session no longer composes ($failure); re-negotiating once.")
                 cache.clear()
-                fakts = getActiveFakts(url, forceRefresh = true).first
-                instanceMap = buildInstanceMap(fakts)
+                session = getSession(url, forceRefresh = true).first
+                fromCache = false
+                val recomposed = compose(session)
+                failure = recomposed.first
+                instanceMap = recomposed.second
             }
 
-            val missing = requiredKeys.filter { instanceMap[it] == null }
-            if (missing.isNotEmpty()) {
-                throw CompositionError("No reachable alias for required service(s): ${missing.joinToString()}.")
-            }
+            failure?.let { throw CompositionError(it) }
 
+            tokens = buildTokenManager(url, session)
+
+            // A cached access token is very likely expired; prove the credentials still work
+            // before wiring four clients to them.
             try {
-                token = loginUser(fakts.auth)
+                tokens.accessToken()
                 break
             } catch (e: TokenError) {
-                if (e.statusCode == 400 && !forceRefresh) {
+                if (fromCache && !forceRefresh) {
                     println(
-                            "Token endpoint returned 400 (stale client credentials); " +
-                                    "clearing cache and restarting device flow from scratch."
+                            "The cached refresh token was rejected (${e.statusCode ?: "transport"}); " +
+                                    "clearing the cache and restarting the device flow from scratch."
                     )
                     cache.clear()
                     forceRefresh = true
@@ -1402,11 +956,12 @@ class Arkitekt(
                 throw e
             }
         }
-        println("Obtained token (${token.length} chars, prefix ${token.take(6)}…)")
 
-        var rekuest = Rekuest(instanceMap["rekuest"]!!, token)
-        var unlok = Unlok(fakts.self.alias, token) // lok is the deployment itself (self.alias)
-        var mikro = Mikro(instanceMap["mikro"]!!, token)
+        // NB: `fakts` on this class is the protocol client; the envelope is session.fakts.
+        val envelope = session.fakts
+        var rekuest = Rekuest(instanceMap["rekuest"]!!, tokens)
+        var unlok = Unlok(envelope.self.alias, tokens) // lok is the deployment (self.alias)
+        var mikro = Mikro(instanceMap["mikro"]!!, tokens)
         var datalayer = Datalayer(instanceMap["datalayer"]!!, mikro)
 
         var app =
@@ -1420,177 +975,22 @@ class Arkitekt(
                 imageDisplayService
             )
 
-
-        println("Here is the app $app")
-        var registry = FunctionRegistry()
-
-        registry.register_function(
-            "frage",
-            DefinitionInput(
-                key = "frage",
-                version = "0.1.0",
-                name = "Upload Image",
-                description =
-                    Optional.present(
-                        "Upload the currently active image in the viewer."
-                    ),
-                args =
-                    Optional.present(
-                        listOf(
-                            ArgPortInput(
-                                key = "name",
-                                kind = PortKind.STRING,
-                                description =
-                                    Optional.present(
-                                        "How would you like to name the image?"
-                                    ),
-                                nullable = Optional.present(false)
-                            )
-                        )
-                    ),
-                returns =
-                    Optional.present(
-                        listOf(
-                            ReturnPortInput(
-                                key = "image",
-                                kind = PortKind.STRUCTURE,
-                                identifier =
-                                    Optional.present(
-                                        "@mikro/image"
-                                    ),
-                                description =
-                                    Optional.present(
-                                        "The returned image"
-                                    )
-                            )
-                        )
-                    ),
-                kind = ActionKind.FUNCTION
-            ),
-            ::runX
+        // Tell the deployment which aliases actually answered. Best-effort; never throws.
+        val aliasReports = envelope.instances.keys.associateWith { key ->
+            val alias = instanceMap[key]
+            if (alias != null) AliasReport(valid = true, alias_id = alias.id)
+            else AliasReport(valid = false, reason = "No working alias found for service: $key")
+        }
+        fakts.report(
+                session.endpoint,
+                tokens.accessToken(),
+                aliasReports,
+                functional = aliasReports.values.all { it.valid }
         )
 
-        registry.register_function(
-            "show_image",
-            DefinitionInput(
-                key = "show_image",
-                version = "0.1.0",
-                name = "Show Image",
-                description =
-                    Optional.present(
-                        "Show the currently active Image in the viewer."
-                    ),
-                args =
-                    Optional.present(
-                        listOf(
-                            ArgPortInput(
-                                key = "image",
-                                kind = PortKind.STRUCTURE,
-                                identifier =
-                                    Optional.present(
-                                        "@mikro/image"
-                                    ),
-                                description =
-                                    Optional.present(
-                                        "The image to show"
-                                    ),
-                                nullable = Optional.present(false)
-                            )
-                        )
-                    ),
-                returns =
-                    Optional.present(
-                        listOf(
-                            ReturnPortInput(
-                                key = "image",
-                                kind = PortKind.STRUCTURE,
-                                identifier =
-                                    Optional.present(
-                                        "@mikro/image"
-                                    ),
-                                description =
-                                    Optional.present(
-                                        "The image that was shown image"
-                                    ),
-                                nullable = Optional.present(false)
-                            )
-                        )
-                    ),
-                kind = ActionKind.FUNCTION
-            ),
-            ::loadImage
-        )
+        var registry = buildFunctionRegistry(this)
 
-        registry.register_function(
-            "run_image_to_image_macro",
-            DefinitionInput(
-                key = "run_image_to_image_macro",
-                version = "0.1.0",
-                name = "Run Image-To-Image Macro",
-                description =
-                    Optional.present(
-                        "Run an arbitrary ImageJ macro over an image and return the result as a new image."
-                    ),
-                args =
-                    Optional.present(
-                        listOf(
-                            ArgPortInput(
-                                key = "image",
-                                kind = PortKind.STRUCTURE,
-                                identifier =
-                                    Optional.present(
-                                        "@mikro/image"
-                                    ),
-                                description =
-                                    Optional.present(
-                                        "The image to run the macro on"
-                                    ),
-                                nullable = Optional.present(false)
-                            ),
-                            ArgPortInput(
-                                key = "macro",
-                                kind = PortKind.STRING,
-                                description =
-                                    Optional.present(
-                                        "The ImageJ macro to run. It operates on the image as the current image, e.g. run(\"Gaussian Blur...\", \"sigma=2\")."
-                                    ),
-                                nullable = Optional.present(false)
-                            ),
-                            ArgPortInput(
-                                key = "name",
-                                kind = PortKind.STRING,
-                                description =
-                                    Optional.present(
-                                        "How would you like to name the resulting image?"
-                                    ),
-                                nullable = Optional.present(true)
-                            )
-                        )
-                    ),
-                returns =
-                    Optional.present(
-                        listOf(
-                            ReturnPortInput(
-                                key = "image",
-                                kind = PortKind.STRUCTURE,
-                                identifier =
-                                    Optional.present(
-                                        "@mikro/image"
-                                    ),
-                                description =
-                                    Optional.present(
-                                        "The resulting image after running the macro"
-                                    )
-                            )
-                        )
-                    ),
-                kind = ActionKind.FUNCTION
-            ),
-            ::runImageToImageMacro
-        )
-
-
-        var agent = Agent(rekuest, instanceMap["rekuest"]!!, token, registry, app)
+        var agent = Agent(instanceMap["rekuest"]!!, tokens, registry, app)
 
         agent.createAgent("my_agent")
         agent.registerFunctions()
@@ -1602,6 +1002,48 @@ class Arkitekt(
                 }
 
         return unlok.getUser()
+    }
+
+    /**
+     * Check every required service is granted and resolve it to a reachable alias.
+     *
+     * Returns (failure, instanceMap), where a null failure means composed. It reports rather than
+     * throws so the caller can distinguish "this cached session went stale" — worth exactly one
+     * re-negotiation — from "the deployment genuinely will not serve us".
+     */
+    private suspend fun compose(session: FaktsSession): Pair<String?, Map<String, Alias>> {
+        val ungranted = requiredKeys.filter { key ->
+            val status = GrantStatus.from(session.fakts.statuses[key])
+            session.fakts.instances[key] == null ||
+                    status == GrantStatus.DENIED ||
+                    status == GrantStatus.UNAVAILABLE
+        }
+        if (ungranted.isNotEmpty()) {
+            val detail = ungranted.joinToString {
+                "$it=${GrantStatus.from(session.fakts.statuses[it])}"
+            }
+            return "Required service(s) not granted: $detail" to emptyMap()
+        }
+
+        val instanceMap = buildInstanceMap(session.fakts)
+        val unreachable = requiredKeys.filter { instanceMap[it] == null }
+        val failure =
+                if (unreachable.isEmpty()) null
+                else "No reachable alias for required service(s): ${unreachable.joinToString()}"
+        return failure to instanceMap
+    }
+
+    /**
+     * The single token owner for this login. Every rotation is persisted back to the cache
+     * before the new access token is handed out: the refresh token rotates on use, so a lost
+     * one costs the user a browser round-trip on the next start.
+     */
+    private fun buildTokenManager(url: String, session: FaktsSession): TokenManager {
+        val hash = cacheHash(url)
+        return TokenManager(fakts, session.endpoint, session.token, session.fakts) {
+            endpoint, activeFakts, token ->
+            cache.save(FaktsSession(hash, endpoint, activeFakts, token))
+        }
     }
 
     fun logout() {

@@ -88,6 +88,22 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
 
+    // Tests cover only the pure, I/O-free parts of the fakts layer: the token-rotation rule,
+    // the expiry math, and splitting the flat grant response. The protocol itself needs a live
+    // coordination server and is verified by hand.
+    testImplementation(kotlin("test"))
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    // A local fake of the rekuest agent gateway, so the connection lifecycle (INIT, SESSION_INIT,
+    // inquiry reconciliation, heartbeat, KICK/BOUNCE, close codes) can be exercised for real. The
+    // live server currently rejects our registration for an unrelated server-side reason, which
+    // would otherwise leave all of that untested.
+    testImplementation("io.ktor:ktor-server-core:3.0.2")
+    testImplementation("io.ktor:ktor-server-netty:3.0.2")
+    testImplementation("io.ktor:ktor-server-websockets:3.0.2")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 kotlin {

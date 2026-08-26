@@ -17,9 +17,12 @@ import javax.swing.SwingUtilities
 
 /**
  * A SciJava toolbar button that shows the Arkitekt logo and reflects the current connection
- * state: a grayed logo when disconnected, the full-colour logo when connected. Login happens
- * automatically on launch if a config is already cached; otherwise clicking the button starts
- * an interactive login. The menu item (`Plugins > Arkitekt`) remains as a fallback.
+ * state: a grayed logo when disconnected, the full-colour logo when connected. Clicking the
+ * button starts a login; with a cached session that is silent (the refresh grant), otherwise it
+ * opens the browser for approval. The menu item (`Plugins > Arkitekt`) remains as a fallback.
+ *
+ * Login is deliberately NOT attempted at launch: writing to stdout/LogService during ImageJ's UI
+ * bring-up dead-loops the SciJava console pane and the main window never appears.
  *
  * Note: SciJava has no public API to enable/disable a specific tool button, so the icon swap is
  * best-effort via reflection into [IconService]'s button map — any failure is logged and ignored
@@ -126,7 +129,14 @@ class ArkitektTool : AbstractTool() {
 
     /** Kick off a login, wiring the error callback so failures surface (dialog + status + log). */
     private fun startLogin(orchestrator: Arkitekt) {
-        statusService?.showStatus("Arkitekt: connecting to ${Dialog.DEFAULT_SERVER}…")
+        // A cached session carries a refresh token, so the login is silent; without one the
+        // device-code flow will open a browser. Say which, so an unexpected browser is not a
+        // surprise and a silent login does not look like nothing happened.
+        val silent = orchestrator.hasCachedConfig(Dialog.DEFAULT_SERVER)
+        statusService?.showStatus(
+                if (silent) "Arkitekt: reconnecting to ${Dialog.DEFAULT_SERVER}…"
+                else "Arkitekt: connecting to ${Dialog.DEFAULT_SERVER} — approve in your browser…"
+        )
         orchestrator.login(
                 Dialog.DEFAULT_SERVER,
                 onSuccess = { report("ArkitektTool: login succeeded") },

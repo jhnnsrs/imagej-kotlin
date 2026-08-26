@@ -36,7 +36,15 @@ JDK 11 and 17 are the only full JDKs installed; the build is pinned to 17. `./gr
 print a benign `Cannot create plugin: ...JavaScriptScriptLanguage` line and then keep running
 (window stays up). On a different machine, point `org.gradle.java.home` at any full JDK ≤ 17.
 
-There are **no tests** in this repo. Bytecode target is pinned to **Java 8**
+Tests (`./gradlew test`, JUnit 5, 50 of them) cover the fakts token-rotation rule, expiry math and
+flat-grant split (`FaktsTest.kt`, `TokenManagerTest.kt`); the agent wire format and close-code
+policy (`AgentProtocolTest.kt`, `CloseCodeTest.kt`); and the agent's whole connection lifecycle
+(`AgentLifecycleTest.kt`) driven against `FakeGateway.kt`, a local Ktor stand-in for the `/agi`
+gateway. The fake exists because the live gateway currently refuses our registration for a
+server-side reason (see the org-claim note below) — without it, everything past REGISTER would be
+verified only by reading, and that is exactly where a mishandled close hangs the agent or starts an
+eviction war. The tests boot a headless ImageJ context (~250ms) to build a real `App`.
+The fakts device-code flow still needs a live coordination server and is verified by hand. Bytecode target is pinned to **Java 8**
 (`jvmTarget = "1.8"`, `sourceCompatibility/targetCompatibility = "1.8"`) for Fiji distribution,
 even though the toolchain/run JVM is 17 — don't introduce APIs above Java 8 in source.
 
@@ -81,7 +89,11 @@ with a live backend) — the schema files are committed, so codegen works offlin
 
 ## Architecture
 
-The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/` (4 files).
+The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/`:
+`Fakts.kt` (protocol + models + cache), `TokenManager.kt`, `Auth.kt` (Apollo interceptors),
+`Arkitekt.kt` (orchestration, image/Zarr, action handlers), `Actions.kt` (port definitions),
+`Agent.kt` + `AgentProtocol.kt`, `ArkitektCommand.kt`, `ArkitektTool.kt`, `ArkitektState.kt`,
+`NodeId.kt`, `MacroSmokeTest.kt`.
 
 **Entry point** — `ArkitektCommand.kt`
 - `@Plugin(menuPath = "Plugins > Arkitekt")` SciJava `Command`. SciJava injects services
@@ -91,32 +103,73 @@ The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/` (4 files).
 - `main()` boots a standalone ImageJ for IDE debugging.
 
 **Orchestration** — `Arkitekt.kt` (the bulk of the code)
-- **Auth: the fakts-next protocol** (`getActiveFakts` → `alogin`): a three-stage negotiation
-  against a coordination server — `discover` (`GET {url}/.well-known/fakts` → `FaktsEndpoint`,
-  yielding `base_url` + `configure_url`) → `demand` (device code: `POST {base}start/`, open the
-  browser at `{configure_url}{code}`, poll `POST {base}challenge/` every 1s for
-  granted/denied/error) → `claim` (`POST {base}claim/` with `{token, secure}` → `ActiveFakts`).
-  Status envelopes are `{status, …}`. The full `ActiveFakts` is cached to
-  `~/.arkitekt/fakts_cache.json` keyed by `sha256(manifest + url)` (`FaktsCache`); a changed
-  manifest/url invalidates it, and a stale cache (aliases stop answering) triggers exactly one
-  re-negotiation (self-heal). `logout()` clears the cache.
-- **ActiveFakts shape**: `self` (deployment, whose `self.alias` **is** the lok endpoint —
-  wired into `Unlok`, no longer a requirement), `auth` (OAuth2 client creds + `token_url`),
-  `instances` keyed by requirement key (`rekuest`/`mikro`/`datalayer`), and `statuses`
-  (`GrantStatus` granted/denied/unavailable/unknown). `getFirstReachableAlias` GET-probes each
-  alias's challenge URL (`alias.to_http_path(alias.challenge)`) to pick a live endpoint.
-  Required services must be `GRANTED` and resolvable or `alogin` throws `CompositionError`.
+- **Auth: fakts protocol 2** (`Fakts.kt`; sequenced by `negotiate`/`getSession` → `alogin`).
+  Two OAuth2 round-trips, where protocol 1 had four proprietary ones:
+  `discover` (`GET {url}/.well-known/fakts` → `FaktsEndpoint`; **`protocol_version` must be
+  `"2"`** — a protocol-1 deployment fails here, loudly, and there is no compatibility mode) →
+  `deviceAuthorize` (`POST {device_authorization_endpoint}`, JSON `{manifest,
+  requested_client_kind}` → RFC 8628 device authorization **plus dynamic client registration**:
+  the `client_id` is minted here; gated on the non-RFC literal `status == "granted"`) → open the
+  browser at the server-supplied `verification_uri_complete` → `pollToken` (`POST
+  {token_endpoint}`, **form-encoded**, `grant_type=urn:ietf:params:oauth:grant-type:device_code`).
+  There is no `claim` step: **the successful token response IS the claim** — the OAuth2 members
+  and the fakts envelope (`self`/`instances`/`statuses`) are top-level siblings in one flat JSON
+  object, split by `splitGrantResponse`.
+  The poll **branches on the `error` member, never on HTTP success**: "still waiting" is an HTTP
+  400 carrying `{"error": "authorization_pending"}`. It honours the server's `interval`
+  (sleeping *before* the first poll), backs off `+5s` on `slow_down`, and is bounded by
+  wall-clock `expires_in` on a monotonic clock. The device code is single-use.
+- **Tokens rotate — this is the load-bearing constraint.** There is no `client_secret` any more,
+  so nothing can independently re-mint a token, and the **refresh token rotates on every use**:
+  two concurrent refreshes kill the session permanently (the user must re-approve in a browser).
+  So every consumer — the three Apollo clients and the agent WebSocket — pulls its token from the
+  single **`TokenManager`** (`TokenManager.kt`), which serializes refreshes under a `Mutex`,
+  persists the rotated refresh token *before* handing out the new access token, and refreshes
+  proactively 60s ahead of expiry. Its one subtle rule: a **forced** refresh (the server just
+  rejected our token) must never settle for an in-flight **non-forced** one, which would hand
+  back that very token — it waits the raced one out, then refreshes for real. Forced-into-forced
+  coalesces. `AuthRetryInterceptor` (`Auth.kt`) forces a refresh and replays an operation once on
+  `extensions.code == "UNAUTHENTICATED"` (and only that code — `PERMISSION_DENIED` and
+  `INTERNAL_ERROR` are never retried).
+  A refresh response may legitimately carry **no** envelope (the server renders it best-effort);
+  that must refresh the session, not destroy it, so the current config is kept. Conversely a
+  refresh that *does* carry one is the **config-push channel**: aliases are re-rendered against
+  the requesting host, so config changes arrive without a human re-approving.
+- **The session** (`FaktsSession` = endpoint + envelope + token) is cached to
+  `~/.arkitekt/fakts_cache.json`, keyed by `sha256("v2:" + manifest + "|" + url)` (`FaktsCache`).
+  Written on **every refresh**, not just at login — the rotated refresh token is the only thing
+  that survives a restart. A protocol-1 record fails to decode, which is exactly the migration
+  we want. `hasCachedConfig(url)` means "do I hold a usable refresh token", i.e. can this login
+  be silent. A stale cache (aliases stop answering, or the refresh is rejected) triggers exactly
+  one re-negotiation (self-heal). `logout()` clears it.
+- **ActiveFakts shape**: `self` (deployment, whose `self.alias` **is** the lok endpoint — wired
+  into `Unlok`, not a requirement), `instances` keyed by requirement key
+  (`rekuest`/`mikro`/`datalayer`), and `statuses` (`GrantStatus`; the server only ever emits
+  granted/denied/unavailable, `UNKNOWN` is our coercion). **There is no `auth` block** — the
+  `client_id` the refresh grant needs lives on the token instead.
+  `getFirstReachableAlias` GET-probes each alias's challenge URL
+  (`alias.to_http_path(alias.challenge)`; `challenge` is a path fragment, not a nonce) to pick a
+  live endpoint. Required services must be `GRANTED` and resolvable or `alogin` throws
+  `CompositionError`. `Instance.challenge_key` (Ed25519) is modelled but **not verified** — the
+  Python client does verify it, which is the obvious follow-up.
+  After composing, `alogin` POSTs an alias report to `{base_url}report/` (best-effort, never
+  throws) — the only use `base_url` has; every other endpoint arrives fully qualified.
 - **Service clients**: `Unlok` (lok), `Mikro`, `Rekuest` each wrap an `ApolloClient` with an
-  `AuthorizationInterceptor` (Bearer token) + logging interceptors. `Datalayer` issues
-  S3 credentials via mikro mutations (`RequestUpload`/`RequestAccess`) and builds an
-  `S3Store` for Zarr. All bundled into the `App` god-object passed to every action.
-- **Image <-> Zarr conversion**: `imgPlusToCTZXYUInt32UcarArray` flattens an ImageJ `ImgPlus`
-  into a fixed **c,t,z,y,x** `ucar.ma2.Array` (currently force-casts everything to UINT32);
+  `AuthorizationInterceptor` (Bearer token pulled from the `TokenManager` **per request**, not
+  baked in at construction) + `AuthRetryInterceptor` + logging interceptors. `Datalayer` takes
+  `(alias, mikro)` and is *not* a token consumer — it authenticates transitively through Mikro's
+  client, issuing fresh S3 session credentials per request via mikro mutations
+  (`RequestZarrUpload`/`FinishZarrUpload`/`RequestZarrAccess`) and building an `S3Store` for
+  Zarr. All bundled into the `App` god-object passed to every action.
+- **Image <-> Zarr conversion**: `imgPlusToCTZYXUcarArray` flattens an ImageJ `ImgPlus`
+  into a fixed **c,t,z,y,x** `ucar.ma2.Array` (preserving the source dtype);
   `uploadArray` writes it as a Blosc-compressed Zarr array to S3 then registers it via
   `FromArrayLikeMutation`. `loadArrayAsDataset` does the reverse, dispatching on Zarr dtype
   to the right `ArrayImgs` factory and creating a `Dataset`.
-- **Action handlers**: `runX` (upload active image) and `loadImage` (download + display).
-  Each has signature `suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>`.
+- **Action handlers**: `runX` (upload active image), `loadImage` (download + display) and
+  `runImageToImageMacro`. Each has signature
+  `suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>`; their typed port
+  definitions live in `Actions.kt` (`buildFunctionRegistry`).
 
 **Agent / remote-invocation runtime** — `Agent.kt` + `AgentProtocol.kt`
 - `FunctionRegistry` maps an `interface` name → (handler fn, `DefinitionInput`). Handlers are
@@ -124,23 +177,66 @@ The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/` (4 files).
 - `Agent.createAgent(name)` calls `ensureAgent(AgentInput{name})`, then `registerFunctions()`
   advertises all implementations in one `implementAgent(ImplementAgentInput{implementations})` call
   (the rekuest-next agent API — there is no `instanceId`/`setExtensionImplementations` anymore).
-- `Agent.provideForever()` opens a Ktor **WebSocket** to `…/agi`, sends `REGISTER{token, force}`, then
-  loops (assignations are tracked in a `ConcurrentHashMap<assignation, Job>` so they can be cancelled):
-  - `HEARTBEAT` → `HEARTBEAT_ANSWER`
-  - `ASSIGN` → look up the handler by `interface` name, run it on `Dispatchers.IO`, emit `YIELD`
-    (the return map) + `DONE`, or `CRITICAL` on exception.
+- `Agent.provideForever()` is a **reconnect loop** around `connectOnce()`, which opens a Ktor
+  **WebSocket** to `…/agi` and sends `REGISTER{token, force, session_id}` as its first frame (the
+  token rides *in* the frame, never in the URL, and is pulled fresh per attempt). The per-process
+  `sessionId` is minted **once, outside the loop** — this is load-bearing, not cosmetic: the
+  backend reads `session_id` as "is this the same process?", so presenting the same one lets a
+  reconnect reclaim its in-flight tasks, while a fresh one makes the server fail-and-cascade them.
+  The connection then loops (tasks are tracked in a `ConcurrentHashMap<task, Job>`):
+  - `INIT` — the server's acknowledgement, and the only proof the connection was accepted. On the
+    first one we send `SESSION_INIT{session_id, states:{}}`, which opens the server's `Session`
+    row; it announces the *process*, so it is never repeated on a reconnect. We then answer
+    `INIT.inquiries` — the tasks the server still has open for us — with a `CRITICAL` each
+    (`reportsForInquiries`). There is no inquiry-reply message type; silence would leave those
+    tasks in flight until a server-side sweep. Every job is cancelled when a connection drops, so
+    "it died" is always the honest answer here.
+  - `HEARTBEAT` → `HEARTBEAT_ANSWER`, sent **on the session directly, never through the outbound
+    channel**. The server pings every 10s and closes 3001 if the answer takes >5s, and that answer
+    also renews our write-lease — so liveness must not queue behind a large `YIELD` (or behind a
+    full channel, which would block the receive loop itself).
+  - `ASSIGN` → look up the handler by `interface` name, run it on `Dispatchers.IO`, emit `STARTED`
+    → `YIELD` (the return map) → `COMPLETED`, or `CRITICAL` on exception. **A repeat of a `task`
+    already running is dropped**: delivery is at-least-once (the backend queue does
+    pop → send → ack), and the server dedups the resulting *report* but not the side effect.
   - `CANCEL`/`INTERRUPT` → cancel the running job, emit `CANCELLED`/`INTERRUPTED`; `PAUSE`/`RESUME`
-    → ack-only `PAUSED`/`RESUMED`; `KICK`/`BOUNCE` → close.
+    → ack-only `PAUSED`/`RESUMED`; `KICK` → stop for good; `BOUNCE` → reconnect (honouring its
+    `duration` hint); `PROTOCOL_ERROR` → kept as the connection's failure reason.
+- **What we do on a close is decided by the server's close code**, not by guesswork
+  (`classifyClose` / `AgentCloseCodes`): 3001 (heartbeat timeout) reconnects; 3002/3003/3004 and
+  4003 (blocked) stop; 4004 (a live incumbent holds the agent) waits ~35s for its lease to go
+  stale and retries once; **4005 (displaced) stops** — reconnecting would displace the incumbent
+  right back and turn two instances into a mutual-eviction loop. A transport drop that carried no
+  code at all always reconnects (bounded by the retry budget); "did `INIT` arrive" only colours the
+  log message there, it does not change the decision.
+  ⚠️ The numbers come from the **server** (`facade/codes.py` in the rekuest deployment), *not*
+  from rekuest-next: that client's table predates 4004/4005 and still reads 3001 as "kicked",
+  which would stop an agent for good over a mere heartbeat timeout. Take its *structure*
+  (fatal vs. correctable), not its constants.
+  Backoff mirrors rekuest-next's `ConnectionPolicy`: 1s doubling to a 60s cap with ±10% jitter,
+  5 retries, and the budget is refunded by connection **duration** (30s of uptime), not by merely
+  connecting — otherwise the cap means nothing against a link that connects and instantly drops.
 - Wire messages are `kotlinx.serialization` sealed classes in `AgentProtocol.kt` (`AgentMessage`
   inbound, `AgentEvent` outbound), discriminated by `type` (`agentJson`, `classDiscriminator="type"`).
-  **`assignation` is a UUID string** and every message carries an `id`; outbound events are serialized
-  to `Frame.Text` explicitly (no Ktor content-converter). **The handler return map is serialized
-  straight back as the YIELD payload**, so handler return keys must match the registered `returns` keys.
+  **`task` is a UUID string** (v2 renamed `assignation` → `task`, `DONE` → `COMPLETED` and
+  `ERROR` → `FAILED`) and every message carries an `id`; outbound events are serialized to
+  `Frame.Text` explicitly (no Ktor content-converter). **The handler return map is serialized
+  straight back as the YIELD payload**, so handler return keys must match the registered `returns`
+  keys.
+  Two traps encoded there: `REGISTER` is the **only** message the server declares `extra="forbid"`
+  on, so a stray field closes the socket instead of being ignored (this is how the retired `mode`
+  field broke the agent) — hence `AgentProtocolTest` asserts its *exact* key set. And
+  `APP_CANCELLED` appears in the server's enum but has no message class and is not in the union:
+  sending it is a protocol error, so app-side cancellation is reported as `CANCELLED`.
+  `seq`/`EVENT_ACK` (the at-least-once report contract) are deliberately not implemented — the
+  backend dedups terminal reports by task id anyway, and answering `INIT.inquiries` achieves what
+  rekuest-next's unacked-report replay is for.
 
 ### Adding a new remote action
 1. Write a `suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>` handler
    (usually in `Arkitekt.kt`, alongside `runX`/`loadImage`).
-2. In `alogin`, `registry.register_function(<interface name>, DefinitionInput(...), ::yourFn)`.
+2. In `Actions.kt`'s `buildFunctionRegistry`,
+   `registry.register_function(<interface name>, DefinitionInput(...), arkitekt::yourFn)`.
    `DefinitionInput` requires `key`, `version`, `name`, `kind`; args are `ArgPortInput`, returns are
    `ReturnPortInput` (separate types).
 3. Rebuild — the implementation is auto-advertised on next login; the server can then `ASSIGN` it.
@@ -152,4 +248,8 @@ The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/` (4 files).
 - Axis order is hard-coded **c,t,z,y,x**; pixel conversion currently clamps/casts to UINT32
   regardless of source type — a known rough edge if working on image fidelity.
 - Errors are mostly surfaced via `println` and a Logger, not structured logging.
-- `instanceId` / extension name is hard-coded to `"default"` in several places.
+- The agent name is hard-coded to `"my_agent"` in `alogin`.
+- `requested_client_kind` is sent as `"desktop"`. The server also accepts
+  `requested_client_role` (`interface`|`agent`, default `interface`) — we send nothing, so we
+  register as an `interface` even though this plugin *is* an agent. Worth confirming with the
+  backend.
