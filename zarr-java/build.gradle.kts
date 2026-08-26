@@ -33,7 +33,11 @@ dependencies {
     api("edu.ucar:cdm-core:5.9.1")
     api("software.amazon.awssdk:s3:2.34.6")
     api("com.scalableminds:blosc-java:0.3-1.21.6")
-    api("com.github.luben:zstd-jni:1.5.5-7")
+    // Version-matched to Fiji's zstd-jni-1.5.5-10. This is the one collision the root project's
+    // shadowJar CANNOT relocate away: zstd-jni is JNI, and the native symbol names encode the Java
+    // package (Java_com_github_luben_zstd_...), so relocating the class breaks the binding. Keeping
+    // the versions identical makes it not matter which copy Fiji's classloader picks.
+    api("com.github.luben:zstd-jni:1.5.5-10")
     api("com.squareup.okhttp3:okhttp:4.12.0")
     api("org.apache.commons:commons-compress:1.28.0")
     api("info.picocli:picocli:4.7.6")

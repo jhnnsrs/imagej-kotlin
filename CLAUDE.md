@@ -55,13 +55,15 @@ The fakts device-code flow still needs a live coordination server and is verifie
 even though the toolchain/run JVM is 17 — don't introduce APIs above Java 8 in source.
 
 Both bundling tasks share one `stagePlugin` **`Sync`** task (so a dependency dropped from
-`runtimeClasspath` also leaves the bundle instead of lingering forever). `installToImageJ`
+`runtimeClasspath` also leaves the bundle instead of lingering forever; it now stages the single
+`shadowJar` output plus the `.arkitekt-plugin` marker). `installToImageJ`
 defaults to the author's Fiji path but takes `-PfijiDir=`; it stays a plain `Copy` on purpose,
 since a `Sync` into a user-supplied directory would wipe whatever a mistyped path points at. `buildPlugin` is a real `Zip` task whose name carries `$version`
 (`-PpluginVersion=` overrides it; that is how the release workflow stamps the git tag).
 
-**Bundle size is a maintained property, not an accident** (177 MB -> 44 MB, 289 -> 102 jars).
-Both bundling tasks copy `runtimeClasspath` wholesale, so *anything* that lands there ships:
+**Bundle size is a maintained property, not an accident** (177 MB -> 44 MB, 289 -> 102 jars,
+now one shaded jar — see the shading section below). Both bundling tasks ship whatever reaches
+`runtimeClasspath`, since that is what `shadowJar` reads:
 - `net.imagej:imagej` is **`compileOnly`**, like `imagej-legacy`. As an `implementation` dep it
   dragged the whole ImageJ2/SciJava stack into the bundle — ~210 jars duplicating Fiji's own
   `jars/` (`scijava-common`, `imagej-common`, `imglib2`, and alarmingly `imagej-updater` and
@@ -76,9 +78,65 @@ Both bundling tasks copy `runtimeClasspath` wholesale, so *anything* that lands 
 
 So: adding an `implementation` dependency that Fiji already ships is the easy way to re-bloat
 this. Prefer `compileOnly` + a dedicated runtime configuration for anything in Fiji's `jars/`.
-~43 small utility jars (commons-*, jackson, guava, kotlin-stdlib, okhttp) still duplicate Fiji;
-they are deliberately kept, because unlike the ImageJ stack there is no guarantee Fiji's version
-is compatible with what this code compiles against.
+
+### Running on *any* Fiji: the baseline and the shading
+Two separate hazards, both silent on the author's machine and loud on someone else's.
+
+**1. Compile LOW, run HIGH.** `Fiji.app/jars` is exactly **`pom-scijava` 36.0.0** — imagej
+**2.14.0**, ij 1.54f, imglib2 6.1.0, scijava-common 2.94.2, imagej-legacy 1.2.0, gson 2.10.1,
+guava 31.1-jre, jackson 2.14.2, okhttp 4.11.0, slf4j 1.7.36, protobuf 3.23.0. `net.imagej:imagej`
+is pinned to **2.14.0** for that reason: a newer Fiji still has these methods, an older one does
+not have 2.16.0's — compiling against the newer aggregator was the wrong direction. Every ImageJ2
+class this plugin imports lives in `imagej-common-2.0.4` / `imagej-ops-2.0.0` /
+`scijava-common-2.94.2` / `imglib2-6.1.0`; the overlays are **not** in the `imagej-deprecated` jar
+Fiji also ships, so no extra coordinate is needed. Bump the pin only to a version some target Fiji
+actually ships. ⚠️ Do **not** replace it with `platform("org.scijava:pom-scijava:36.0.0")`: 662 of
+its managed entries include `kotlin-stdlib` → `${kotlin.version}` and `kotlinx-coroutines` →
+**1.6.4**, which drags the build back below Kotlin 2.1 / ktor 3. It is the source of truth for
+version *numbers*, not a platform to import.
+
+**2. One shaded jar, not ~102 loose ones.** Fiji loads `jars/**` and `plugins/**` into a single
+flat classloader, so every library we ship that Fiji also ships was a coin flip decided by the
+launcher — kotlin-stdlib 2.1.0 vs its 1.8.22, guava 33.4.8 vs 31.1, jackson 2.20 vs 2.14.2, okio
+3.9 vs 3.3, protobuf 4.31 vs 3.23, cdm-core 5.9.1 vs 5.3.3 — and whichever copy won, something
+broke. `shadowJar` (`com.gradleup.shadow`; the `johnrengelman` id is dead on Gradle 8.10) relocates
+those under `com.mycompany.arkitekt.shaded.`. The rule for that list is **relocate what Fiji
+ships** — adding relocations for packages Fiji lacks (ktor, apollo, awssdk) buys nothing and costs
+risk, since some resolve resources by package path. Two deliberate exceptions:
+- **JNI is never relocated** — `com.github.luben.zstd` and blosc-java encode the Java package in
+  their native symbol names (`Java_com_github_luben_zstd_…`), so relocating breaks the binding.
+  zstd-jni is instead version-matched to Fiji's 1.5.5-10 in `zarr-java/build.gradle.kts`.
+- Relocating `org.slf4j` ships an slf4j API with **no provider**, so slf4j output goes to NOP.
+  Harmless here (logging goes through `org.scijava.log.LogService` and `println`).
+
+Shadow rewrites **string constants**, not just bytecode — a literal beginning with a relocated
+package token comes out prefixed. That is what makes `Class.forName("ucar.ma2.Array")` keep
+working, but it also mangles log messages: `"kotlinx-serialization round-trip OK"` printed as
+`"com.mycompany.arkitekt.shaded.kotlinx-serialization round-trip OK"` until it was rephrased.
+
+Derive the relocation list by comparing **packages**, not artifact names: one jar can carry
+several packages, which is how `thredds` and `uk.ac.rdg.resc.edal` were missed at first — they
+ship *inside* cdm-core next to `ucar`, so relocating only `ucar` left our 5.9.1 classes binding to
+Fiji's 5.3.3 ones. Diff the shaded jar's package set against every jar in `Fiji.app/jars` after
+any dependency change. Doing that leaves exactly **5** collisions, both groups deliberate:
+`com.github.luben.zstd(.util)` (JNI, version-matched) and `javax.annotation*` (jsr305, annotation
+-only and identical 3.0.2 on both sides).
+
+Both `./gradlew run` and the JUnit tests exercise the **unshaded** classpath, so a broken
+relocation would otherwise first surface inside someone's Fiji. Two tasks, wired into `check`,
+catch it in CI instead: **`verifyShadedJar`** (nothing that should have moved is still top-level,
+the relocated copies exist, and `META-INF/json/org.scijava.plugin.Plugin` — the only reason the
+menu entry appears — survived the merge) and **`shadedSmokeTest`**, which runs `MacroSmokeTest.kt`
+out of the shaded jar with the **`fijiVintage`** configuration (Fiji's own kotlin-stdlib 1.8.22 /
+guava 31.1 / jackson 2.14.2 / okio 3.3.0) **ahead of it** on the classpath. That ordering is the
+whole point: it reproduces Fiji's older jar winning, so it fails unshaded and passes shaded.
+
+`installToImageJ` now clears stale jars before copying — but **only** from a directory holding the
+`.arkitekt-plugin` marker it writes, so a mistyped `-PfijiDir` still cannot delete anything. This
+matters because the pre-shading `Copy` accumulated: the author's install had grown to 329 files
+carrying cdm-core 5.5.3 *and* 5.9.1, guava 30.1 *and* 33.4.8, okhttp 2.7.5 + 4.11 + 4.12 and
+netty/jnr jars from dependency sets that no longer exist — all of it still on Fiji's classpath.
+An install predating the marker must be `rm -rf`'d once by hand; the task says so and refuses.
 
 ### CI / releases
 `.github/workflows/ci.yml` builds, tests and bundles on push/PR (temurin 17, `gradle/actions/setup-gradle`),
@@ -89,6 +147,18 @@ pinned in `gradle.properties` — a command-line `-D` outranks the project prope
 CI must never run `./gradlew run` (it launches a GUI); tests set
 `java.awt.headless` themselves, so no xvfb is needed. The workflow files under
 `zarr-java/.github/` are vendored from upstream and inert — GitHub only reads the repo root.
+
+**The one fragile dependency in CI is `maven.scijava.org`.** It is the sole non-Central
+repository and it is *required* — the whole `net.imagej` group is absent from Maven Central
+(`imagej`, `imagej-common`, `imagej-legacy` all 404 on repo1; only `org.scijava:*` is synced) — but the
+host (144.92.48.196, UW-Madison) intermittently stalls: the first CI run died with `Read timed out`
+fetching `net.imagej:imagej:2.16.0`. The log shows only that one attempt, so a network **timeout
+appears to abort the whole resolution** rather than falling through to the next repo the way a 404
+does. Two consequences: the retired alias `maven.imagej.net` was removed from
+`repositories` — it resolves to the *same* IP, so it only doubled the exposure — **don't add it
+back**; and `gradle.properties` carries `systemProp.org.gradle.internal.http.{connection,socket}Timeout`
+plus `…repository.max.tentatives`/`initial.backoff` to give that one host more room than Gradle's
+defaults. A dev machine hides all of this behind `~/.gradle/caches`; only a cold CI resolve sees it.
 
 ### zarr-java (vendored in-repo Gradle subproject)
 - `zarr-java/` is **vendored into this repo** — a fork of upstream `zarr-developers/zarr-java`

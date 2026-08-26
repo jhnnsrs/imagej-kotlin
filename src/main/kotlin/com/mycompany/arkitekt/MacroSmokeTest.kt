@@ -42,7 +42,48 @@ fun main() {
     val back = convert.convert(result, Dataset::class.java)
         ?: error("ImagePlus -> Dataset conversion returned null")
     println("ImagePlus -> Dataset OK: ${back.name} dims=${back.numDimensions()}")
+
+    checkShadedRuntime(dataset)
+
     println("MACRO SMOKE TEST PASSED")
     ij.context().dispose()
     System.exit(0)
+}
+
+
+/**
+ * The parts of the runtime that a botched shading would break, and nothing else here touches.
+ *
+ * Run via the `shadedSmokeTest` Gradle task, which puts Fiji's OWN library versions (kotlin-stdlib
+ * 1.8.22, guava 31.1, jackson 2.14.2, okio 3.3.0 ...) on the classpath AHEAD of the shaded jar --
+ * exactly the collision Fiji's flat classloader creates. Each of these three exercises a package
+ * the shadowJar block relocates:
+ *
+ *  - kotlinx-serialization: compiler-generated serializers, the most stdlib-coupled thing we run,
+ *    and the reason relocating `kotlin` is the risky part of the whole scheme.
+ *  - coroutines: `runBlocking` pulls in the dispatcher ServiceLoader files that mergeServiceFiles()
+ *    has to have relocated in step with the classes.
+ *  - ucar.ma2: cdm-core 5.9.1 vs Fiji's 5.3.3, on the plugin's actual write path.
+ *
+ * Under `macroSmokeTest` (unshaded) it simply passes, which keeps the two tasks sharing one main.
+ */
+private fun checkShadedRuntime(dataset: Dataset) {
+    val assign = AgentMessage.Assign(functionName = "smoke", task = "t-1")
+    val wire = agentJson.encodeToString(AgentMessage.serializer(), assign)
+    check("\"type\":\"ASSIGN\"" in wire) { "serialization produced no discriminator: $wire" }
+    val decoded = agentJson.decodeFromString(AgentMessage.serializer(), wire)
+    check(decoded == assign) { "serialization round-trip changed the message: $decoded" }
+    // NB: do not start these strings with a relocated package token ("kotlinx…", "ucar…").
+    // Shadow rewrites string constants as well as bytecode, so the message would come out as
+    // "com.mycompany.arkitekt.shaded.kotlinx-serialization round-trip OK".
+    println("serialization round-trip OK: $wire")
+
+    val fromCoroutine = kotlinx.coroutines.runBlocking { "ok" }
+    check(fromCoroutine == "ok")
+    println("coroutines runBlocking OK")
+
+    val array = imgPlusToCTZYXUcarArray(dataset.imgPlus)
+    check(array.rank == 5) { "expected a rank-5 c,t,z,y,x array, got rank ${array.rank}" }
+    check(array.size == 16L) { "expected 4x4 = 16 elements, got ${array.size}" }
+    println("ma2 array OK: rank=${array.rank} shape=${array.shape.joinToString(",")}")
 }
