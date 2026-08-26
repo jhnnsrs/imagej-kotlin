@@ -43,15 +43,15 @@ fun buildFunctionRegistry(arkitekt: Arkitekt): FunctionRegistry {
                     Optional.present(
                         listOf(
                             ReturnPortInput(
-                                key = "image",
+                                key = "dataset",
                                 kind = PortKind.STRUCTURE,
                                 identifier =
                                     Optional.present(
-                                        "@mikro/image"
+                                        "@mikro/arraydataset"
                                     ),
                                 description =
                                     Optional.present(
-                                        "The returned image"
+                                        "The returned dataset"
                                     )
                             )
                         )
@@ -62,28 +62,29 @@ fun buildFunctionRegistry(arkitekt: Arkitekt): FunctionRegistry {
         )
 
         registry.register_function(
-            "show_image",
+            "show_lens",
             DefinitionInput(
-                key = "show_image",
+                key = "show_lens",
                 version = "0.1.0",
-                name = "Show Image",
+                name = "Show Lens",
                 description =
                     Optional.present(
-                        "Show the currently active Image in the viewer."
+                        "Show a lens — a per-axis selection over a dataset — in the viewer. " +
+                            "Only the region the lens selects is read."
                     ),
                 args =
                     Optional.present(
                         listOf(
                             ArgPortInput(
-                                key = "image",
+                                key = "lens",
                                 kind = PortKind.STRUCTURE,
                                 identifier =
                                     Optional.present(
-                                        "@mikro/image"
+                                        "@mikro/lens"
                                     ),
                                 description =
                                     Optional.present(
-                                        "The image to show"
+                                        "The lens to show"
                                     ),
                                 nullable = Optional.present(false)
                             )
@@ -93,15 +94,15 @@ fun buildFunctionRegistry(arkitekt: Arkitekt): FunctionRegistry {
                     Optional.present(
                         listOf(
                             ReturnPortInput(
-                                key = "image",
+                                key = "lens",
                                 kind = PortKind.STRUCTURE,
                                 identifier =
                                     Optional.present(
-                                        "@mikro/image"
+                                        "@mikro/lens"
                                     ),
                                 description =
                                     Optional.present(
-                                        "The image that was shown image"
+                                        "The lens that was shown"
                                     ),
                                 nullable = Optional.present(false)
                             )
@@ -109,7 +110,114 @@ fun buildFunctionRegistry(arkitekt: Arkitekt): FunctionRegistry {
                     ),
                 kind = ActionKind.FUNCTION
             ),
-            arkitekt::loadImage
+            arkitekt::showLens
+        )
+
+        registry.register_function(
+            "show_dataset",
+            DefinitionInput(
+                key = "show_dataset",
+                version = "0.1.0",
+                name = "Show Dataset",
+                description =
+                    Optional.present(
+                        "Show a whole array dataset in the viewer."
+                    ),
+                args =
+                    Optional.present(
+                        listOf(
+                            ArgPortInput(
+                                key = "dataset",
+                                kind = PortKind.STRUCTURE,
+                                identifier =
+                                    Optional.present(
+                                        "@mikro/arraydataset"
+                                    ),
+                                description =
+                                    Optional.present(
+                                        "The dataset to show"
+                                    ),
+                                nullable = Optional.present(false)
+                            )
+                        )
+                    ),
+                returns =
+                    Optional.present(
+                        listOf(
+                            ReturnPortInput(
+                                key = "dataset",
+                                kind = PortKind.STRUCTURE,
+                                identifier =
+                                    Optional.present(
+                                        "@mikro/arraydataset"
+                                    ),
+                                description =
+                                    Optional.present(
+                                        "The dataset that was shown"
+                                    ),
+                                nullable = Optional.present(false)
+                            )
+                        )
+                    ),
+                kind = ActionKind.FUNCTION
+            ),
+            arkitekt::showDataset
+        )
+
+        registry.register_function(
+            "annotate_lens",
+            DefinitionInput(
+                key = "annotate_lens",
+                version = "0.1.0",
+                name = "Annotate Lens",
+                description =
+                    Optional.present(
+                        "Open a lens in the viewer and save every ROI drawn on it into a new " +
+                            "annotation collection, as it is drawn. In Fiji, press `t` to bank a " +
+                            "selection into the ROI Manager — that is the signal a shape is " +
+                            "finished. Runs until the image window is closed or the task is " +
+                            "cancelled; a dropped connection ends the session (the shapes already " +
+                            "saved are kept, but a re-run starts a second collection)."
+                    ),
+                args =
+                    Optional.present(
+                        listOf(
+                            ArgPortInput(
+                                key = "lens",
+                                kind = PortKind.STRUCTURE,
+                                identifier =
+                                    Optional.present(
+                                        "@mikro/lens"
+                                    ),
+                                description =
+                                    Optional.present(
+                                        "The lens to open and annotate"
+                                    ),
+                                nullable = Optional.present(false)
+                            )
+                        )
+                    ),
+                returns =
+                    Optional.present(
+                        listOf(
+                            ReturnPortInput(
+                                key = "collection",
+                                kind = PortKind.STRUCTURE,
+                                identifier =
+                                    Optional.present(
+                                        "@mikro/annotationcollection"
+                                    ),
+                                description =
+                                    Optional.present(
+                                        "The collection the drawn ROIs were saved into"
+                                    ),
+                                nullable = Optional.present(false)
+                            )
+                        )
+                    ),
+                kind = ActionKind.FUNCTION
+            ),
+            arkitekt::annotateLens
         )
 
         registry.register_function(
@@ -126,15 +234,15 @@ fun buildFunctionRegistry(arkitekt: Arkitekt): FunctionRegistry {
                     Optional.present(
                         listOf(
                             ArgPortInput(
-                                key = "image",
+                                key = "dataset",
                                 kind = PortKind.STRUCTURE,
                                 identifier =
                                     Optional.present(
-                                        "@mikro/image"
+                                        "@mikro/arraydataset"
                                     ),
                                 description =
                                     Optional.present(
-                                        "The image to run the macro on"
+                                        "The dataset to run the macro on"
                                     ),
                                 nullable = Optional.present(false)
                             ),
@@ -162,15 +270,15 @@ fun buildFunctionRegistry(arkitekt: Arkitekt): FunctionRegistry {
                     Optional.present(
                         listOf(
                             ReturnPortInput(
-                                key = "image",
+                                key = "dataset",
                                 kind = PortKind.STRUCTURE,
                                 identifier =
                                     Optional.present(
-                                        "@mikro/image"
+                                        "@mikro/arraydataset"
                                     ),
                                 description =
                                     Optional.present(
-                                        "The resulting image after running the macro"
+                                        "The resulting dataset after running the macro"
                                     )
                             )
                         )

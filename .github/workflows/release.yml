@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    # Needed to create the release and upload the asset; no other secrets involved.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # -PpluginVersion drops the leading `v` from the tag, so v0.1.0 produces
+      # build/arkitekt-plugin-0.1.0.zip. See the `version =` line in build.gradle.kts.
+      # -D override of org.gradle.java.home: see the note in ci.yml.
+      - name: Build and bundle
+        run: |
+          ./gradlew build buildPlugin \
+            -Dorg.gradle.java.home="$JAVA_HOME" \
+            -PpluginVersion="${GITHUB_REF_NAME#v}" \
+            --stacktrace
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/arkitekt-plugin-*.zip
+          generate_release_notes: true
+          body: |
+            ## Installing
+
+            1. Download `arkitekt-plugin-*.zip` below.
+            2. Unzip it into your Fiji installation's `plugins/` directory — the zip
+               contains a single `arkitekt/` folder, so you end up with
+               `Fiji.app/plugins/arkitekt/`.
+            3. Restart Fiji. The plugin appears under **Plugins > Arkitekt**.

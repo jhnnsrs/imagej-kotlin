@@ -1,0 +1,47 @@
+# Drawing surface for the "annotate a lens" action.
+#
+# A collection owns its own coordinate system, and `axes` is required — a derivation no longer
+# implies an identity to copy axes across. We declare the axes to be *the lens' axes, in array
+# order*, which does two things at once: it makes the IDENTITY edge well-formed (an identity needs
+# matching rank and names), and it fixes the layout of every `vectors` entry we send, since vectors
+# are positional in the collection's declared axis order.
+#
+# `derivedFrom` with `transform: {kind: IDENTITY}` is what PLACES the collection. Omit the transform
+# and the edge is UNMAPPABLE — lineage only, no geometry — and every mutation still succeeds, which
+# is exactly why the end-to-end check reads `intrinsicBbox` back rather than trusting the ids.
+# The source is the LENS rather than the dataset: a lens' own edge back to its dataset already
+# carries the crop, so pointing at it gets the rest of the chain for free.
+mutation CreateAnnotationCollection($input: CreateAnnotationCollectionInput!) {
+  createAnnotationCollection(input: $input) {
+    id
+    name
+    coordinateSystem {
+      id
+      axes {
+        order
+        name
+        type
+      }
+    }
+  }
+}
+
+# One drawn shape. `vectors` are in the collection's own coordinates; `coordinates` pins the
+# discrete slice the shape was drawn on (an axis it does not pin is one it spans).
+mutation CreateAnnotation($input: CreateAnnotationInput!) {
+  createAnnotation(input: $input) {
+    id
+    kind
+    vectors
+  }
+}
+
+# A shape the user re-dragged. Only the supplied fields change, and new vectors re-derive the
+# bounding box against the current transform chain.
+mutation UpdateAnnotation($input: UpdateAnnotationInput!) {
+  updateAnnotation(input: $input) {
+    id
+    kind
+    vectors
+  }
+}

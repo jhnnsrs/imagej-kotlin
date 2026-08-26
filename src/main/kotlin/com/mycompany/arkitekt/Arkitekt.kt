@@ -14,13 +14,27 @@ import com.apollographql.apollo.api.http.HttpResponse
 import com.apollographql.apollo.network.http.HttpInterceptor
 import com.apollographql.apollo.network.http.HttpInterceptorChain
 import com.mycompany.lok.graphql.MeQuery
-import com.mycompany.mikro.graphql.FromArrayLikeMutation
-import com.mycompany.mikro.graphql.GetImageQuery
+import com.mycompany.mikro.graphql.CreateAnnotationCollectionMutation
+import com.mycompany.mikro.graphql.CreateAnnotationMutation
+import com.mycompany.mikro.graphql.UpdateAnnotationMutation
+import com.mycompany.mikro.graphql.CreateArrayDatasetMutation
+import com.mycompany.mikro.graphql.GetArrayDatasetQuery
+import com.mycompany.mikro.graphql.GetLensQuery
 import com.mycompany.mikro.graphql.FinishZarrUploadMutation
 import com.mycompany.mikro.graphql.RequestZarrAccessMutation
 import com.mycompany.mikro.graphql.RequestZarrUploadMutation
+import com.mycompany.mikro.graphql.type.AxisInput
+import com.mycompany.mikro.graphql.type.AxisType
+import com.mycompany.mikro.graphql.type.CoordinateInput
+import com.mycompany.mikro.graphql.type.CreatableTransformKind
+import com.mycompany.mikro.graphql.type.CreateAnnotationCollectionInput
+import com.mycompany.mikro.graphql.type.CreateAnnotationInput
+import com.mycompany.mikro.graphql.type.DerivationSourceKind
+import com.mycompany.mikro.graphql.type.DerivedFromInput
+import com.mycompany.mikro.graphql.type.TransformInput
+import com.mycompany.mikro.graphql.type.UpdateAnnotationInput
+import com.mycompany.mikro.graphql.type.CreateArrayDatasetInput
 import com.mycompany.mikro.graphql.type.FinishZarrUploadInput
-import com.mycompany.mikro.graphql.type.FromArrayLikeInput
 import com.mycompany.mikro.graphql.type.RequestZarrAccessInput
 import com.mycompany.mikro.graphql.type.RequestZarrUploadInput
 import com.mycompany.rekuest.graphql.type.*
@@ -44,7 +58,9 @@ import net.imagej.ImgPlus
 import net.imagej.axis.Axes
 import net.imagej.axis.CalibratedAxis
 import net.imagej.axis.DefaultLinearAxis
+import net.imagej.display.ImageDisplay
 import net.imagej.display.ImageDisplayService
+import net.imagej.display.OverlayService
 import net.imglib2.RandomAccess
 import net.imglib2.type.numeric.RealType
 import okhttp3.*
@@ -312,7 +328,7 @@ class App(
 )
 
 // A rekuest STRUCTURE arg arrives either as a bare id string or, more commonly, as the shrunk
-// wire form {"__identifier": "@mikro/image", "object": "<id>"} (see rekuest-next
+// wire form {"__identifier": "@mikro/lens", "object": "<id>"} (see rekuest-next
 // structures/serialization/postman.py:ashrink_arg). This returns the id for both shapes.
 fun structureArgId(value: JsonElement?): String {
     if (value == null) throw IllegalArgumentException("Missing structure argument")
@@ -436,125 +452,188 @@ fun <T : RealType<T>> imgPlusToCTZYXUcarArray(imgPlus: ImgPlus<T>): ucar.ma2.Arr
 }
 
 
-fun loadArrayAsDataset(app: App, store: DatalayerStore, name: String): Dataset {
+// The axes the upload path writes, matching the `withDimensionNames("c","t","z","y","x")` in
+// `uploadArray`. mikro v2 imposes no canonical order — `axes` IS the order — so this states what
+// the writer does rather than a convention the server would otherwise assume.
+private val UPLOAD_AXES = listOf(
+        AxisInput(name = "c", type = AxisType.CHANNEL),
+        AxisInput(name = "t", type = AxisType.TIME),
+        AxisInput(name = "z", type = AxisType.SPACE),
+        AxisInput(name = "y", type = AxisType.SPACE),
+        AxisInput(name = "x", type = AxisType.SPACE),
+)
 
+// The store's own dimension names, when it records them, must agree with the axes the coordinate
+// system declares — they are two statements of the same fact and the server builds one from the
+// other. Disagreement means the selection would be applied to the wrong dimensions.
+private fun assertStoreAgrees(axisNames: List<String>, dimensionNames: List<String?>?) {
+    val declared = dimensionNames?.filterNotNull() ?: return
+    if (declared.size != dimensionNames.size) return  // partially named store: nothing to compare
+    require(declared == axisNames) {
+        "The store's dimension names $declared disagree with the source's axes $axisNames"
+    }
+}
+
+// Build a readable selection from a Lens. `Lens.renderAxes` is deprecated, so the render axes are
+// inferred from the axis names and types together (`resolveRenderAxes`); `Lens.shape` cross-checks
+// what we derived from the slices.
+fun lensViewOf(lens: GetLensQuery.Lens): LensView {
+    val axes = lens.coordinateSystem?.axes
+            ?.sortedBy { it.order }
+            ?.map { AxisSpec(it.name, it.type) }
+            ?: throw IllegalStateException("Lens ${lens.id} has no coordinate system, so its axis types are unknown")
+
+    require(axes.map { it.name } == lens.axisNames) {
+        "Lens ${lens.id} reports axis names ${lens.axisNames} but its coordinate system declares ${axes.map { it.name }}"
+    }
+
+    val level0 = lens.dataset.dataArrays.firstOrNull { it.level == 0 }
+            ?: throw IllegalStateException("Dataset ${lens.dataset.id} has no level-0 array to read")
+    assertStoreAgrees(lens.axisNames, level0.store.dimensionNames)
+
+    return buildLensView(
+            storeId = level0.store.id,
+            axes = axes,
+            storeShape = level0.shape,
+            slices = lens.slices.map { SliceSpec(it.axis, it.start, it.stop, it.step) },
+            render = resolveRenderAxes(axes),
+            name = lens.dataset.name,
+            serverShape = lens.shape,
+    )
+}
+
+// The same, for a whole ArrayDataset: no slices, and the same locally-inferred render axes.
+suspend fun fetchDatasetView(app: App, datasetId: String): LensView {
+    val response = app.mikro.getClient().query(GetArrayDatasetQuery(id = datasetId)).execute()
+    val dataset = response.dataOrThrow().arrayDataset
+
+    val axes = dataset.intrinsicSystem?.axes
+            ?.sortedBy { it.order }
+            ?.map { AxisSpec(it.name, it.type) }
+            ?: throw IllegalStateException("Dataset ${dataset.id} has no intrinsic coordinate system")
+
+    val level0 = dataset.dataArrays.firstOrNull { it.level == 0 }
+            ?: throw IllegalStateException("Dataset ${dataset.id} has no level-0 array to read")
+    assertStoreAgrees(dataset.axisNames, level0.store.dimensionNames)
+
+    return buildLensView(
+            storeId = level0.store.id,
+            axes = axes,
+            storeShape = level0.shape,
+            slices = emptyList(),
+            render = resolveRenderAxes(axes),
+            name = dataset.name,
+            serverShape = null,
+    )
+}
+
+// Read the box a [LensView] selects out of its zarr store and hand it to [buildDataset].
+//
+// Two functions rather than one so the interesting half — the permutation, the dtype dispatch
+// and the axis labelling — is testable without S3 or a network.
+fun loadLensView(app: App, store: DatalayerStore, view: LensView): Dataset {
     val zarrArray = Array.open(store.store.resolve())
-    val zarrArrayMetadata = zarrArray.metadata()
+
+    // read(offset, shape) pulls out the [start, stop) box. It has no stride, so a stepped lens
+    // is subsampled afterwards.
+    val box: ucar.ma2.Array = zarrArray.read(view.offset, view.extent)
+
+    return buildDataset(app, applyStride(box, view), view)
+}
+
+// Turn a read selection into an ImageJ Dataset with correctly named and typed axes.
+//
+// The permutation is the load-bearing part. ImgLib2 iterates dimension 0 fastest; ucar iterates
+// its LAST dimension fastest. So to zip a flat ucar IndexIterator against a flat ImgLib2 Cursor
+// the ucar array must be permuted into the reverse of the ImageJ dimension order. The previous
+// version of this function skipped that and hard-coded c,t,z,y,x, which silently transposed the
+// two slowest axes whenever an image had both channels > 1 and time > 1.
+fun buildDataset(app: App, array: ucar.ma2.Array, view: LensView): Dataset {
     val datasetService = app.datasetService
 
-    // read takes (offset, shape) as long[]; metadata.shape is already long[].
-    val array: ucar.ma2.Array =
-            zarrArray.read(
-                    longArrayOf(0, 0, 0, 0, 0),
-                    zarrArrayMetadata.shape,
-            )
+    val order = imageJDimOrder(view)                       // indices into view.axes, ImageJ order
+    val dims = order.map { array.shape[it].toLong() }.toLongArray()
 
-    // Canonical c,t,z,y,x — matches the upload order and the stored dimension names.
-    val shape = array.shape
-    val channels = shape[0]  // Channels
-    val time = shape[1]      // Timepoints
-    val zSlices = shape[2]   // Z-stack depth
-    val height = shape[3]    // Image height (Y)
-    val width = shape[4]     // Image width (X)
-    // NOTE: each dtype branch zips the ucar IndexIterator (x fastest … c slowest) against the
-    // ImgLib2 cursor of an (x,y,z,c,t) image (x fastest … t slowest). The two agree on x,y,z;
-    // they only diverge in the two slowest axes when an image has BOTH channels>1 and time>1,
-    // which this single-image upload path does not currently produce.
+    // ucar's last dimension varies fastest, ImgLib2's first does — hence the reverse.
+    val permuted = array.permute(order.reversedArray()).copy()
 
-    val dataset: Dataset = when (array.dataType) {
+    // Label every dimension. An axis the renderer does not name keeps its own name rather than
+    // being dropped, which is what lets a MICROTIME or SPECTRUM axis reach the viewer.
+    val axisTypes = order.map { imageJAxisTypeFor(view.axes[it].name, view.render) }.toTypedArray()
+    val name = view.name
+
+    return when (permuted.dataType) {
         UcarDataType.UBYTE, UcarDataType.BYTE -> {
             // uint8 reads back as ucar UBYTE; mask to keep the unsigned 0..255 magnitude.
-            val img = ArrayImgs.unsignedBytes(width.toLong(), height.toLong(), zSlices.toLong(), channels.toLong(), time.toLong())
+            val img = ArrayImgs.unsignedBytes(*dims)
             val cursor: Cursor<UnsignedByteType> = img.cursor()
-            val iterator = array.indexIterator // NetCDF's IndexIterator to access elements
+            val iterator = permuted.indexIterator
             while (cursor.hasNext() && iterator.hasNext()) {
                 cursor.fwd()
                 cursor.get().set(iterator.byteNext.toInt() and 0xFF)
             }
-            datasetService.create(img)
+            datasetService.create(ImgPlus(img, name, axisTypes))
         }
-        UcarDataType.SHORT -> {
-            val img = ArrayImgs.unsignedShorts(width.toLong(), height.toLong(), zSlices.toLong(), channels.toLong(), time.toLong())
+        UcarDataType.SHORT, UcarDataType.USHORT -> {
+            val img = ArrayImgs.unsignedShorts(*dims)
             val cursor: Cursor<UnsignedShortType> = img.cursor()
-            val iterator = array.indexIterator
+            val iterator = permuted.indexIterator
             while (cursor.hasNext() && iterator.hasNext()) {
                 cursor.fwd()
-                cursor.get().set(iterator.shortNext.toInt() and 0xFFFF) // Correctly reads short values
+                cursor.get().set(iterator.shortNext.toInt() and 0xFFFF)
             }
-            datasetService.create(img)
+            datasetService.create(ImgPlus(img, name, axisTypes))
         }
-        UcarDataType.USHORT -> {
-            val img = ArrayImgs.unsignedShorts(width.toLong(), height.toLong(), zSlices.toLong(), channels.toLong(), time.toLong())
-            val cursor: Cursor<UnsignedShortType> = img.cursor()
-            val iterator = array.indexIterator
+        UcarDataType.UINT -> {
+            val img = ArrayImgs.unsignedInts(*dims)
+            val cursor: Cursor<UnsignedIntType> = img.cursor()
+            val iterator = permuted.indexIterator
             while (cursor.hasNext() && iterator.hasNext()) {
                 cursor.fwd()
-                cursor.get().set(iterator.shortNext.toInt() and 0xFFFF) // Correctly reads short values
+                cursor.get().set(iterator.intNext.toLong() and 0xFFFFFFFFL)
             }
-            datasetService.create(img)
+            datasetService.create(ImgPlus(img, name, axisTypes))
         }
-
-        UcarDataType.UINT -> { // Treat as UINT32
-            val img = ArrayImgs.unsignedInts(width.toLong(), height.toLong(), zSlices.toLong(), channels.toLong(), time.toLong())
-            val cursor: Cursor<net.imglib2.type.numeric.integer.UnsignedIntType> = img.cursor()
-            val iterator = array.indexIterator
+        UcarDataType.INT -> {
+            val img = ArrayImgs.ints(*dims)
+            val cursor: Cursor<IntType> = img.cursor()
+            val iterator = permuted.indexIterator
             while (cursor.hasNext() && iterator.hasNext()) {
                 cursor.fwd()
-                cursor.get().set(iterator.intNext.toLong() and 0xFFFFFFFFL) // Ensures correct unsigned handling
+                cursor.get().set(iterator.intNext)
             }
-            datasetService.create(img)
-        }
-        UcarDataType.INT -> { // Treat as UINT32
-            val img = ArrayImgs.ints(width.toLong(), height.toLong(), zSlices.toLong(), channels.toLong(), time.toLong())
-            val cursor: Cursor<net.imglib2.type.numeric.integer.IntType> = img.cursor()
-            val iterator = array.indexIterator
-            while (cursor.hasNext() && iterator.hasNext()) {
-                cursor.fwd()
-                cursor.get().set(iterator.intNext.toInt()) // Ensures correct unsigned handling
-            }
-            datasetService.create(img)
+            datasetService.create(ImgPlus(img, name, axisTypes))
         }
         UcarDataType.FLOAT -> {
-            val img = ArrayImgs.floats(width.toLong(), height.toLong(), zSlices.toLong(), channels.toLong(), time.toLong())
+            val img = ArrayImgs.floats(*dims)
             val cursor: Cursor<FloatType> = img.cursor()
-            val iterator = array.indexIterator
+            val iterator = permuted.indexIterator
             while (cursor.hasNext() && iterator.hasNext()) {
                 cursor.fwd()
-                cursor.get().set(iterator.floatNext) // Correctly reads float values
+                cursor.get().set(iterator.floatNext)
             }
-            datasetService.create(img)
+            datasetService.create(ImgPlus(img, name, axisTypes))
         }
         UcarDataType.DOUBLE -> {
-            val img = ArrayImgs.doubles(width.toLong(), height.toLong(), zSlices.toLong(), channels.toLong(), time.toLong())
+            val img = ArrayImgs.doubles(*dims)
             val cursor: Cursor<DoubleType> = img.cursor()
-            val iterator = array.indexIterator
+            val iterator = permuted.indexIterator
             while (cursor.hasNext() && iterator.hasNext()) {
                 cursor.fwd()
-                cursor.get().set(iterator.doubleNext) // Correctly reads float values
+                cursor.get().set(iterator.doubleNext)
             }
-            datasetService.create(img)
+            datasetService.create(ImgPlus(img, name, axisTypes))
         }
-        else -> throw IllegalArgumentException("Unsupported data type: ${array.dataType}")
+        else -> throw IllegalArgumentException("Unsupported data type: ${permuted.dataType}")
     }
-
-
-    return dataset
-
-
 }
-
-
-
-
-
-
-
 
 // Run an arbitrary ImageJ (IJ1) macro against a Dataset and return the transformed Dataset.
 //
 // The macro engine (`ij.IJ.runMacro`) is IJ1-only, so this needs the ImageJ legacy layer on the
-// classpath — present when the plugin runs inside Fiji, absent from the standalone `./gradlew run`
-// ImageJ (see build.gradle.kts: imagej-legacy is compileOnly). The conversion Dataset<->ImagePlus
+// classpath — Fiji provides it, and `./gradlew run` / `macroSmokeTest` get it from the dedicated
+// `ij1Runtime` configuration (build.gradle.kts: imagej-legacy is compileOnly so it never reaches
+// runtimeClasspath and is never bundled). The conversion Dataset<->ImagePlus
 // is done through the SciJava ConvertService, whose converters imagej-legacy registers at runtime.
 //
 // The image is made the IJ1 "current image" via WindowManager.setTempCurrentImage — this avoids
@@ -569,8 +648,8 @@ fun runMacroOnDataset(app: App, dataset: Dataset, macro: String): Dataset {
     val imp = convertService.convert(dataset, ImagePlus::class.java)
             ?: throw IllegalStateException(
                     "Could not convert the image to an IJ1 ImagePlus. Running macros requires the " +
-                            "ImageJ legacy layer (Fiji / imagej-legacy) on the classpath — it is not " +
-                            "available in the standalone `./gradlew run` ImageJ."
+                            "ImageJ legacy layer (imagej-legacy) on the classpath — Fiji provides it, " +
+                            "as does the `ij1Runtime` configuration under `./gradlew run`."
             )
 
     val result: ImagePlus =
@@ -777,7 +856,7 @@ class Arkitekt(
             app: App,
             inarray: ucar.ma2.Array,
             name: String
-    ): FromArrayLikeMutation.FromArrayLike {
+    ): CreateArrayDatasetMutation.CreateArrayDataset {
 
         val s3Client = app.datalayer.requestStore()
 
@@ -819,15 +898,25 @@ class Arkitekt(
         // Finalize the upload before registering it (the server validates the store).
         app.datalayer.finishStore(s3Client.storeId)
 
-        var mutation =
-                FromArrayLikeMutation(FromArrayLikeInput(array = s3Client.storeId, name = name))
+        // The writer above declares its dimension names as c,t,z,y,x; `axes` must say the same
+        // thing with types attached. mikro v2 imposes no canonical order — `axes` IS the order —
+        // so this states the order the writer used rather than a convention the server assumes.
+        val mutation =
+                CreateArrayDatasetMutation(
+                        CreateArrayDatasetInput(
+                                data = s3Client.storeId,
+                                scales = emptyList(),
+                                name = name,
+                                axes = UPLOAD_AXES,
+                        )
+                )
 
         val client = app.mikro.getClient()
 
         val response = client.mutation(mutation).execute()
 
         println("Response: ${response.data}")
-        return response.dataOrThrow().fromArrayLike
+        return response.dataOrThrow().createArrayDataset
     }
 
     suspend fun runX(app: App, args: Map<String, JsonElement?>): Map<String, JsonElement?> {
@@ -840,64 +929,220 @@ class Arkitekt(
 
         var array = imgPlusToCTZYXUcarArray(active.imgPlus)
 
-        var image = uploadArray(app, array, name)
+        var dataset = uploadArray(app, array, name)
 
-        return mapOf(Pair("image", structureReturn("@mikro/image", image.id)))
+        return mapOf(Pair("dataset", structureReturn("@mikro/arraydataset", dataset.id)))
     }
 
 
-    suspend fun loadImage(app: App, args: Map<String, JsonElement?>): Map<String, JsonElement?> {
+    // Show a mikro Lens: the per-axis selection over a dataset that the server renders as a
+    // layer. Only the box the lens selects is read — a lens cropped to four z-planes shows four
+    // planes, not the whole stack.
+    suspend fun showLens(app: App, args: Map<String, JsonElement?>): Map<String, JsonElement?> {
 
-        imageDisplayService.imageDisplays.forEach { d -> println(d) }
+        val lensId = structureArgId(args["lens"])
 
-        val imageId = structureArgId(args["image"])
+        val response = app.mikro.getClient().query(GetLensQuery(id = lensId)).execute()
+        val lens = response.dataOrThrow().lens
 
-        val response = app.mikro.getClient().query(GetImageQuery(id = imageId)).execute()
+        val view = lensViewOf(lens)
+        val store = app.datalayer.requestAccess(view.storeId)
+        val dataset = loadLensView(app, store, view)
 
-        println("Response: ${response.data}")
-        response.data.let { data ->
-            if (data == null) {
-                throw Exception("Failed to retrieve user data")
+        app.imageDisplayService.createImageDisplay(dataset)
+
+        return mapOf(Pair("lens", structureReturn("@mikro/lens", lensId)))
+    }
+
+    // The unsliced sibling of `showLens`: a whole ArrayDataset, read through the same path as a
+    // lens that selects everything.
+    suspend fun showDataset(app: App, args: Map<String, JsonElement?>): Map<String, JsonElement?> {
+
+        val datasetId = structureArgId(args["dataset"])
+
+        val view = fetchDatasetView(app, datasetId)
+        val store = app.datalayer.requestAccess(view.storeId)
+        val dataset = loadLensView(app, store, view)
+
+        app.imageDisplayService.createImageDisplay(dataset)
+
+        return mapOf(Pair("dataset", structureReturn("@mikro/arraydataset", datasetId)))
+    }
+
+    // How often the drawing surface is re-read. Fast enough to feel live to someone drawing, slow
+    // enough that a session costs a handful of cheap reads per second and no server traffic unless
+    // something actually changed.
+    private val POLL_INTERVAL_MS = 500L
+
+    // The slice a shape sits on, for every axis it does not span.
+    //
+    // An IJ1 ROI banked in the ROI Manager remembers the slice it was drawn on, and the viewer has
+    // usually moved on since — so the ROI's own answer wins where it has one. IJ1 positions are
+    // 1-based with 0 meaning "unset"; mikro's are plain indices, hence the -1.
+    //
+    // Axes nothing can answer for are left out rather than pinned to a guessed 0: an unpinned axis
+    // reads server-side as "the shape spans it", which is the honest answer when we do not know.
+    private fun positionOf(item: DrawnShape, display: ImageDisplay, view: LensView): Map<String, Int> {
+        val fromDisplay = view.axes
+                .filter { it.name != view.render.x && it.name != view.render.y }
+                .mapNotNull { axis ->
+                    runCatching { axis.name to display.getIntPosition(imageJAxisTypeFor(axis.name, view.render)) }
+                            .getOrNull()
+                }
+                .toMap()
+
+        return fromDisplay + ij1Pins(item.ij1Position, view.render)
+    }
+
+    // Open a lens and save every ROI the user draws into a fresh annotation collection, as they
+    // draw it.
+    //
+    // "Live" here means each shape is persisted the moment it appears — it is a side effect against
+    // mikro, not a stream back to rekuest, because this agent client emits exactly one YIELD per
+    // ASSIGN (Agent.kt) and mikro has no annotation subscription. The action therefore runs long and
+    // returns the collection id only at the end; every shape is already saved by then.
+    //
+    // The collection is minted up front with an IDENTITY edge onto the LENS. That is what PLACES it:
+    // omit the transform and the edge is UNMAPPABLE — lineage only, no geometry — and every mutation
+    // still succeeds, so the failure is invisible from here. Naming the lens rather than the dataset
+    // means the lens' own edge back to its dataset carries any crop for free.
+    suspend fun annotateLens(app: App, args: Map<String, JsonElement?>): Map<String, JsonElement?> {
+
+        val lensId = structureArgId(args["lens"])
+
+        val lens = app.mikro.getClient().query(GetLensQuery(id = lensId)).execute().dataOrThrow().lens
+        val view = lensViewOf(lens)
+        val store = app.datalayer.requestAccess(view.storeId)
+        val dataset = loadLensView(app, store, view)
+
+        // The collection's axes ARE the lens' axes, in array order. Two things ride on that: an
+        // IDENTITY edge needs matching rank and names, and `vectors` are positional in the
+        // collection's declared axis order — so this is also what fixes the layout we send.
+        val collection = app.mikro.getClient().mutation(
+                CreateAnnotationCollectionMutation(
+                        CreateAnnotationCollectionInput(
+                                name = "${lens.dataset.name} — ImageJ",
+                                axes = view.axes.map { AxisInput(name = it.name, type = it.type) },
+                                derivedFrom = Optional.present(
+                                        listOf(
+                                                DerivedFromInput(
+                                                        kind = DerivationSourceKind.LENS,
+                                                        lens = Optional.present(lensId),
+                                                        transform = Optional.present(
+                                                                TransformInput(kind = CreatableTransformKind.IDENTITY)
+                                                        ),
+                                                )
+                                        )
+                                ),
+                        )
+                )
+        ).execute().dataOrThrow().createAnnotationCollection
+
+        val display = withContext(Dispatchers.Main) { app.imageDisplayService.createImageDisplay(dataset) }
+        val overlayService = app.datasetService.context().getService(OverlayService::class.java)
+
+        // Object identity, not geometry: ImageJ returns the same Overlay/Roi instance each poll, so
+        // an edit is "same object, new geometry" (update) and a new drawing is a new object
+        // (create). A geometry key would make every edit a duplicate.
+        val saved = IdentityHashMap<Any, String>()
+        val lastGeometry = IdentityHashMap<Any, List<List<Double>>>()
+
+        // Everything already on screen when we started — notably the ROI Manager, which is a global
+        // singleton that outlives a run. Without this, a second annotate_lens re-saves the first
+        // session's shapes into its new collection.
+        val baseline = withContext(Dispatchers.Main) { drawnBaseline(overlayService, display) }
+
+        try {
+            // Runs until the user closes the window, or the server cancels the task. A closed
+            // display is dropped from the service's list, which is the only close signal available
+            // without subscribing to events — but that list is only consulted AFTER a first poll,
+            // because a display that has not registered yet would otherwise end the session
+            // immediately and report success having saved nothing.
+            var polled = false
+            while (!polled || withContext(Dispatchers.Main) { app.imageDisplayService.imageDisplays.contains(display) }) {
+                val drawn = withContext(Dispatchers.Main) { readDrawnShapes(overlayService, display, baseline) }
+                polled = true
+
+                for (item in drawn) {
+                    val spec = runCatching {
+                        annotationSpecFor(item.shape, view.axes, view.render, positionOf(item, display, view))
+                    }.getOrNull() ?: continue
+
+                    // A failed mutation must not end the drawing session — this action is meant to
+                    // run for as long as someone is drawing, and one transient error would otherwise
+                    // propagate out of the handler and be reported CRITICAL.
+                    runCatching {
+                    val existing = saved[item.source]
+                    if (existing == null) {
+                        val created = app.mikro.getClient().mutation(
+                                CreateAnnotationMutation(
+                                        CreateAnnotationInput(
+                                                kind = spec.kind,
+                                                vectors = spec.vectors,
+                                                collection = Optional.present(collection.id),
+                                                coordinates = Optional.present(
+                                                        spec.coordinates.map { CoordinateInput(it.first, it.second) }
+                                                ),
+                                        )
+                                )
+                        ).execute().dataOrThrow().createAnnotation
+                        // Annotation.id is the UUID scalar, which Apollo types as Any.
+                        saved[item.source] = created.id.toString()
+                        lastGeometry[item.source] = spec.vectors
+                    } else if (lastGeometry[item.source] != spec.vectors) {
+                        app.mikro.getClient().mutation(
+                                UpdateAnnotationMutation(
+                                        UpdateAnnotationInput(
+                                                id = existing,
+                                                kind = Optional.present(spec.kind),
+                                                vectors = Optional.present(spec.vectors),
+                                                coordinates = Optional.present(
+                                                        spec.coordinates.map { CoordinateInput(it.first, it.second) }
+                                                ),
+                                        )
+                                )
+                        ).execute()
+                        lastGeometry[item.source] = spec.vectors
+                    }
+                    }.onFailure { println("annotate_lens: could not save a ${spec.kind}: ${it.message}") }
+                }
+
+                // A cancellable suspension point: CANCEL/INTERRUPT are cooperative Job.cancel(), so
+                // the loop must never block.
+                delay(POLL_INTERVAL_MS)
             }
-            println(data)
-
-
-            var store = app.datalayer.requestAccess((data.image.store.id))
-
-            var dataset = loadArrayAsDataset(app, store, data.image.name)
-
-            app.imageDisplayService.createImageDisplay(dataset)
-
+        } finally {
+            // Cancellation lands here too. Every shape is already persisted, so there is nothing to
+            // flush — this only reports what the session managed to save.
+            println("annotate_lens: saved ${saved.size} annotation(s) into collection ${collection.id}")
         }
 
-        return mapOf(Pair("image", structureReturn("@mikro/image", imageId)))
-
+        return mapOf(Pair("collection", structureReturn("@mikro/annotationcollection", collection.id)))
     }
 
     // Download an image, run an arbitrary ImageJ macro over it (image in -> image out), and upload
-    // the result as a new @mikro/image. The macro sees the downloaded image as the IJ1 "current
+    // the result as a new @mikro/arraydataset. The macro sees the downloaded image as the IJ1 "current
     // image" and typically transforms it in place (e.g. run("Gaussian Blur...", "sigma=2")).
     suspend fun runImageToImageMacro(app: App, args: Map<String, JsonElement?>): Map<String, JsonElement?> {
 
-        val imageId = structureArgId(args["image"])
+        val imageId = structureArgId(args["dataset"])
         val macro = args["macro"]?.jsonPrimitive?.contentOrNull
                 ?: throw IllegalArgumentException("Missing 'macro' argument")
         val name = args["name"]?.jsonPrimitive?.contentOrNull ?: "Macro result"
 
-        // 1. Download the input image as a Dataset (same access path as loadImage).
-        val response = app.mikro.getClient().query(GetImageQuery(id = imageId)).execute()
-        val data = response.data ?: throw Exception("Failed to retrieve image $imageId")
-        val store = app.datalayer.requestAccess(data.image.store.id)
-        val inputDataset = loadArrayAsDataset(app, store, data.image.name)
+        // 1. Download the input dataset (same access path as showDataset).
+        val view = fetchDatasetView(app, imageId)
+        val store = app.datalayer.requestAccess(view.storeId)
+        val inputDataset = loadLensView(app, store, view)
 
         // 2. Run the macro (needs the IJ1 legacy layer; see runMacroOnDataset).
         val outputDataset = runMacroOnDataset(app, inputDataset, macro)
 
-        // 3. Upload the transformed image as a new @mikro/image.
+        // 3. Upload the transformed image as a new @mikro/arraydataset.
         val array = imgPlusToCTZYXUcarArray(outputDataset.imgPlus)
-        val image = uploadArray(app, array, name)
+        val result = uploadArray(app, array, name)
 
-        return mapOf(Pair("image", structureReturn("@mikro/image", image.id)))
+        return mapOf(Pair("dataset", structureReturn("@mikro/arraydataset", result.id)))
     }
 
     suspend fun alogin(url: String): MeQuery.Data {

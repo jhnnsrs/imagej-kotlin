@@ -10,9 +10,10 @@ ImageJ instance as a remote **agent**, and exposes ImageJ actions (upload the ac
 image, load an image back into the viewer) that the Arkitekt server can invoke remotely
 over a WebSocket. Images are moved as Zarr arrays stored in S3.
 
-> Note: `README.md` and `pom.xml` are **stale leftovers** from the `example-imagej2-command-kotlin`
-> template — the project migrated to Gradle. Ignore Maven/`mvn` instructions in the README.
-> The build is Gradle (`build.gradle.kts`).
+> Note: `pom.xml` is a **stale leftover** from the `example-imagej2-command-kotlin` template —
+> the project migrated to Gradle, and the root POM is not part of any build (it even declares
+> `<ciManagement><system>None</system></ciManagement>`). The build is Gradle (`build.gradle.kts`).
+> `README.md` was rewritten and is current: it documents installing from a GitHub Release.
 
 ## Build & run
 
@@ -20,9 +21,10 @@ over a WebSocket. Images are moved as Zarr arrays stored in S3.
 ./gradlew build                 # compile + generate Apollo GraphQL clients
 ./gradlew run                   # launches ImageJ with the plugin via ArkitektCommand.main()
                                 #   (provided by the `application` plugin; mainClass = ...ArkitektCommandKt)
-./gradlew installToImageJ       # copies plugin + runtime deps into a hard-coded local Fiji.app
-                                #   (build/plugins -> /home/jhnnsrs/Programs/fiji-linux64/Fiji.app/plugins/arkitekt)
-./gradlew buildPlugin           # bundles plugin + deps into build/arkitekt-plugin.zip for distribution
+./gradlew installToImageJ       # syncs plugin + runtime deps into a local Fiji.app
+                                #   (default target /home/jhnnsrs/Programs/.../Fiji.app/plugins/arkitekt;
+                                #    override with -PfijiDir=/path/to/Fiji.app/plugins/arkitekt)
+./gradlew buildPlugin           # bundles plugin + deps into build/arkitekt-plugin-<version>.zip
 ```
 
 **JDK requirement (important):** build/run needs a **full (non-headless) JDK 17**.
@@ -36,9 +38,13 @@ JDK 11 and 17 are the only full JDKs installed; the build is pinned to 17. `./gr
 print a benign `Cannot create plugin: ...JavaScriptScriptLanguage` line and then keep running
 (window stays up). On a different machine, point `org.gradle.java.home` at any full JDK ≤ 17.
 
-Tests (`./gradlew test`, JUnit 5, 50 of them) cover the fakts token-rotation rule, expiry math and
+Tests (`./gradlew test`, JUnit 5, 90 of them) cover the fakts token-rotation rule, expiry math and
 flat-grant split (`FaktsTest.kt`, `TokenManagerTest.kt`); the agent wire format and close-code
-policy (`AgentProtocolTest.kt`, `CloseCodeTest.kt`); and the agent's whole connection lifecycle
+policy (`AgentProtocolTest.kt`, `CloseCodeTest.kt`); the lens read path — render-axis derivation,
+slice resolution, the permutation and the stride (`LensViewTest.kt`, which needs no network); the
+ROI write path — collection-axis-order vectors, the inclusive far corner, the per-kind vertex
+minimums and IJ1's 1-based/0-means-unset slice positions (`RoiAnnotationTest.kt`); and the agent's
+whole connection lifecycle
 (`AgentLifecycleTest.kt`) driven against `FakeGateway.kt`, a local Ktor stand-in for the `/agi`
 gateway. The fake exists because the live gateway currently refuses our registration for a
 server-side reason (see the org-claim note below) — without it, everything past REGISTER would be
@@ -48,8 +54,41 @@ The fakts device-code flow still needs a live coordination server and is verifie
 (`jvmTarget = "1.8"`, `sourceCompatibility/targetCompatibility = "1.8"`) for Fiji distribution,
 even though the toolchain/run JVM is 17 — don't introduce APIs above Java 8 in source.
 
-`installToImageJ` contains a hard-coded path to the author's Fiji install — adjust the
-`doLast` block in `build.gradle.kts` before using it on another machine.
+Both bundling tasks share one `stagePlugin` **`Sync`** task (so a dependency dropped from
+`runtimeClasspath` also leaves the bundle instead of lingering forever). `installToImageJ`
+defaults to the author's Fiji path but takes `-PfijiDir=`; it stays a plain `Copy` on purpose,
+since a `Sync` into a user-supplied directory would wipe whatever a mistyped path points at. `buildPlugin` is a real `Zip` task whose name carries `$version`
+(`-PpluginVersion=` overrides it; that is how the release workflow stamps the git tag).
+
+**Bundle size is a maintained property, not an accident** (177 MB -> 44 MB, 289 -> 102 jars).
+Both bundling tasks copy `runtimeClasspath` wholesale, so *anything* that lands there ships:
+- `net.imagej:imagej` is **`compileOnly`**, like `imagej-legacy`. As an `implementation` dep it
+  dragged the whole ImageJ2/SciJava stack into the bundle — ~210 jars duplicating Fiji's own
+  `jars/` (`scijava-common`, `imagej-common`, `imglib2`, and alarmingly `imagej-updater` and
+  `imagej-launcher`), including ~70 MB of scripting-language engines (scala3-compiler 19 MB,
+  jython 15 MB, jruby 18 MB, clojure, renjin) arriving via `imagej-scripting`. Fiji provides all
+  of it at runtime. It stays available to `run`/`macroSmokeTest` through the **`imagejRuntime`**
+  configuration and to the tests through `testImplementation`.
+- `software.amazon.awssdk:netty-nio-client` is **excluded globally**: only the *sync* `S3Client`
+  is ever built (`Datalayer` in `Arkitekt.kt`, zarr-java's `S3Store`), so the Netty async stack
+  was ~4 MB of dead weight. This fails at **runtime, not compile time** — introducing an
+  `S3AsyncClient` means dropping the exclude.
+
+So: adding an `implementation` dependency that Fiji already ships is the easy way to re-bloat
+this. Prefer `compileOnly` + a dedicated runtime configuration for anything in Fiji's `jars/`.
+~43 small utility jars (commons-*, jackson, guava, kotlin-stdlib, okhttp) still duplicate Fiji;
+they are deliberately kept, because unlike the ImageJ stack there is no guarantee Fiji's version
+is compatible with what this code compiles against.
+
+### CI / releases
+`.github/workflows/ci.yml` builds, tests and bundles on push/PR (temurin 17, `gradle/actions/setup-gradle`),
+uploading the zip as a run artifact. `.github/workflows/release.yml` fires on a `v*` tag and
+attaches `arkitekt-plugin-<version>.zip` to a GitHub Release. Both pass
+`-Dorg.gradle.java.home="$JAVA_HOME"` to override the machine-specific `org.gradle.java.home`
+pinned in `gradle.properties` — a command-line `-D` outranks the project properties file.
+CI must never run `./gradlew run` (it launches a GUI); tests set
+`java.awt.headless` themselves, so no xvfb is needed. The workflow files under
+`zarr-java/.github/` are vendored from upstream and inert — GitHub only reads the repo root.
 
 ### zarr-java (vendored in-repo Gradle subproject)
 - `zarr-java/` is **vendored into this repo** — a fork of upstream `zarr-developers/zarr-java`
@@ -74,26 +113,37 @@ even though the toolchain/run JVM is 17 — don't introduce APIs above Java 8 in
 ## GraphQL / Apollo codegen
 
 Three Apollo services are configured in `build.gradle.kts`, each generating a typed client
-under a distinct package. **Generated code is what you import** (e.g. `com.mycompany.mikro.graphql.GetImageQuery`).
+under a distinct package. **Generated code is what you import** (e.g. `com.mycompany.mikro.graphql.GetLensQuery`).
 
 | Service   | Package                        | `.graphql` ops + schema location | Backend role |
 |-----------|--------------------------------|----------------------------------|--------------|
 | `lok`     | `com.mycompany.lok.graphql`    | `src/main/graphql/lok/`          | auth / "who am I" (`MeQuery`) |
-| `mikro`   | `com.mycompany.mikro.graphql`  | `src/main/graphql/mikro/`        | image metadata + S3 upload/access grants |
+| `mikro`   | `com.mycompany.mikro.graphql`  | `src/main/graphql/mikro/`        | array datasets, lenses, coordinate systems + S3 upload/access grants |
 | `rekuest` | `com.mycompany.rekuest.graphql`| `src/main/graphql/rekuest/`      | agent + action/implementation registration |
 
 To add a query/mutation: drop a `.graphql` file in the right service dir and rebuild.
-The `introspection {}` blocks point at `http://127.0.0.1/<service>/graphql` to refresh the
-committed `schema.graphqls` (run `./gradlew downloadServiceApolloSchemaFromIntrospection`
-with a live backend) — the schema files are committed, so codegen works offline.
+
+The backend serves each service's schema as **plain-text SDL** at `<host>/<service>/schema`, which
+is not a GraphQL introspection endpoint — so there is no Apollo `introspection {}` block. Refresh a
+committed schema with `./gradlew downloadMikroSchema` (or `downloadSchemas` for all three), which
+does a plain GET against `$schemaHost` (`-PschemaHost=`, `$ARKITEKT_SCHEMA_HOST`, default
+`http://jhnnsrs-lab`). It rewrites only `schema.graphqls`; `src/main/graphql/mikro/federation.graphqls`,
+which hand-declares the `@key`/`@link` federation directives Apollo does not auto-import, is
+committed separately and survives a refresh. The schema files are committed, so codegen works
+offline.
+
+⚠️ **mikro is on API v2.** `Image`, the whole `View` family (`RGBView`, `ChannelView`, …) and
+`fromArrayLike` were deleted server-side; the identifier `@mikro/image` no longer exists. See the
+Lens section below.
 
 ## Architecture
 
 The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/`:
 `Fakts.kt` (protocol + models + cache), `TokenManager.kt`, `Auth.kt` (Apollo interceptors),
 `Arkitekt.kt` (orchestration, image/Zarr, action handlers), `Actions.kt` (port definitions),
-`Agent.kt` + `AgentProtocol.kt`, `ArkitektCommand.kt`, `ArkitektTool.kt`, `ArkitektState.kt`,
-`NodeId.kt`, `MacroSmokeTest.kt`.
+`LensView.kt` (the axis algebra of reading a lens), `RoiAnnotation.kt` + `RoiSources.kt`
+(the axis algebra of *writing* a drawn ROI back), `Agent.kt` + `AgentProtocol.kt`,
+`ArkitektCommand.kt`, `ArkitektTool.kt`, `ArkitektState.kt`, `NodeId.kt`, `MacroSmokeTest.kt`.
 
 **Entry point** — `ArkitektCommand.kt`
 - `@Plugin(menuPath = "Plugins > Arkitekt")` SciJava `Command`. SciJava injects services
@@ -161,15 +211,120 @@ The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/`:
   client, issuing fresh S3 session credentials per request via mikro mutations
   (`RequestZarrUpload`/`FinishZarrUpload`/`RequestZarrAccess`) and building an `S3Store` for
   Zarr. All bundled into the `App` god-object passed to every action.
-- **Image <-> Zarr conversion**: `imgPlusToCTZYXUcarArray` flattens an ImageJ `ImgPlus`
-  into a fixed **c,t,z,y,x** `ucar.ma2.Array` (preserving the source dtype);
-  `uploadArray` writes it as a Blosc-compressed Zarr array to S3 then registers it via
-  `FromArrayLikeMutation`. `loadArrayAsDataset` does the reverse, dispatching on Zarr dtype
-  to the right `ArrayImgs` factory and creating a `Dataset`.
-- **Action handlers**: `runX` (upload active image), `loadImage` (download + display) and
+- **Upload (ImageJ -> Zarr)**: `imgPlusToCTZYXUcarArray` flattens an ImageJ `ImgPlus` into a
+  fixed **c,t,z,y,x** `ucar.ma2.Array` (preserving the source dtype); `uploadArray` writes it as a
+  Blosc-compressed Zarr array to S3, then registers it with `CreateArrayDatasetMutation`, whose
+  `axes` argument *states* that c,t,z,y,x order with a semantic type per axis. The writer is the one
+  place a fixed order survives, and `generateChunkShape` hard-requires rank 5 — generalising the
+  writer to arbitrary axes is a separate change.
+- **Download (Lens -> ImageJ)**: see the Lens section below.
+- **Action handlers**: `runX` (upload active image), `showLens` (display a lens), `showDataset`
+  (display a whole dataset), `annotateLens` (display a lens and save drawn ROIs — see below) and
   `runImageToImageMacro`. Each has signature
   `suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>`; their typed port
   definitions live in `Actions.kt` (`buildFunctionRegistry`).
+
+**Reading a Lens (mikro v2)** — `LensView.kt` + `loadLensView`/`buildDataset` in `Arkitekt.kt`
+
+A **`Lens`** is mikro's *"selection over a dataset, nothing else"*: a list of per-axis
+`Slice {axis, start, stop, step}` over an `ArrayDataset`. It is what a `Layer` renders, and it is
+what `showLens` displays. `showDataset` is the unsliced sibling and goes down the same path.
+
+**The axis rules, which is what makes this more than a rename:**
+- **There is no canonical axis order.** `Axis.order` *is* the store's dimension order; `(z,c,y,x)`
+  is as legal as `(c,t,z,y,x)` (the server deleted `assert_axis_type_order`). An axis is
+  `(order, name, type, unit)` with `type` one of
+  `SPACE/TIME/CHANNEL/COORDINATE/DISPLACEMENT/MICROTIME/SPECTRUM/INDEX`.
+- **Which axis is screen x/y/z/time/channel is inferred from the axis names AND types together**,
+  by `resolveRenderAxes` in `LensView.kt`. **`Lens.renderAxes` is deprecated and deliberately not
+  queried** (its SDL description is stale too — it claims a purely positional derivation).
+  The rule, and both halves are load-bearing:
+  - **Type decides candidacy**: which axes are spatial at all, and which one is time/channel. An
+    axis typed SPACE but named `t` is a spatial axis, and is not also claimed as the time axis.
+  - **Name decides which spatial axis is which**: when the spatial set is exactly `{x,y}` or
+    `{x,y,z}` (aliases `width`/`height`/`depth` allowed), each binds to the axis it is called.
+    Position alone cannot do this — `(z,y,x)` and `(x,y,z)` are both well-formed and only one is
+    meant, so reading positionally transposes the second silently.
+  - Otherwise **wholly positional** (last spatial = x, second-to-last = y, third-to-last = z).
+    All-or-nothing: binding the recognised names in a set like `(x,y,q)` and leaving `q`
+    positional would let `q` and `x` both claim x.
+  - Time and channel are found **by type first, by name (`t`/`time`/`frame`, `c`/`channel`/`ch`)
+    only as a fallback**, so a properly typed store is never second-guessed and a sloppy one still
+    works.
+- **A selection never drops or reorders an axis**, so a lens' axis list is its dataset's; only the
+  extents differ. `Lens.shape` is what the slices cut out, and `buildLensView` **cross-checks its
+  derived shape against it and throws on mismatch** — the alternative is reading the wrong pixels
+  and displaying them as if they were right.
+- Slice bounds follow Python's `slice(...).indices(size)` (negatives, clamping) because the server
+  does. A **negative step is refused**: zarr can only read forward.
+- **The pixels are only in `dataset.dataArrays[level == 0].store`** — pick level 0 explicitly, the
+  list order is not guaranteed. `CoordinateAnchor` has no store in v2 (it is a metadata hub).
+
+**The read**: `read(offset, extent)` pulls the `[start, stop)` box (zarr-java has no stride
+overload), then `applyStride` subsamples with **`sectionNoReduce`** — *not* `section`, which drops
+length-1 dimensions, and a lens pinning a single channel or z-plane is the most ordinary lens there
+is; losing its rank would make the permutation address the wrong axes.
+
+**The display**: `buildDataset` permutes into ImageJ's x,y,z,c,t (`imageJDimOrder`) before zipping
+the ucar `IndexIterator` against the ImgLib2 `Cursor` — ImgLib2 iterates dim 0 fastest, ucar its
+*last* dim fastest, so the ucar array is permuted to the reverse of the ImageJ order. Skipping this
+is what silently transposed the two slowest axes whenever an image had both channels > 1 and
+time > 1. Every dimension is then labelled by name (`imageJAxisTypeFor`); an axis the renderer does
+not name — MICROTIME, SPECTRUM, INDEX — becomes a custom `Axes.get(name)` rather than an error.
+
+**Writing ROIs back (mikro v2)** — `RoiAnnotation.kt` + `RoiSources.kt` + `annotateLens`
+
+`annotate_lens` opens a lens and saves every ROI the user draws into a fresh `AnnotationCollection`
+as it is drawn. Four things decide the design, and each is a way to be silently wrong:
+
+- **"Live" is a side effect, not a stream.** This agent client emits exactly **one** `YIELD` per
+  `ASSIGN` (`Agent.kt`: `func(app, args)` -> one `Yield` -> `Completed`, and `outbound` is local to
+  `connectOnce`), so `ActionKind.GENERATOR` is unusable here even though it exists in the rekuest
+  schema. And mikro has **no annotation subscription** (`core/subscriptions/` is just `files.py`), so
+  a viewer sees the shapes on its next query rather than pushed. Each shape is saved the moment it
+  appears; the handler runs long and returns the collection id at the end.
+- **The collection is placed by an `IDENTITY` edge onto the LENS.** `createAnnotationCollection`
+  requires `axes` (it owns its coordinate system), and `derivedFrom` is what places it --
+  WARNING: **omit the `transform` and the edge is `UNMAPPABLE`**: lineage only, no geometry, every
+  mutation still succeeds. Naming the *lens* rather than the dataset means the lens' own `toParent`
+  edge carries any crop for free. The alternative sugar is `createAnnotation(scene:)`, which mints
+  collection + system + registration + **layer**; this path deliberately does not, so the shapes are
+  placed and queryable but not composited into a scene until someone calls `createAnnotationLayer`.
+- **`vectors` are positional in the COLLECTION's declared axis order -- every axis, including
+  non-spatial ones.** So the collection's axes are declared as the lens' axes, and each vertex is
+  emitted full-width: the `renderAxes` x/y axes take the drawn coordinates, every other axis takes
+  its current slice index. A bare `[x, y]` on a `(c,t,z,y,x)` lens would be stored against the
+  channel and time axes. (`ThreeDVector` is a pass-through `list` scalar that enforces nothing;
+  `assert_shape_vectors` only checks equal widths and a per-kind minimum.)
+- **No half-voxel shift and no array->vertex permutation.** The server applies +/-0.5 itself in
+  `vectors_bbox`, purely to derive `intrinsicBbox` -- stored vectors are untouched. And
+  `array_to_vertex_order`, despite being documented as "THE permutation", has no caller on the
+  annotation path. The one real adjustment is an **inclusive far corner**: IJ1's width/height are
+  counts, mikro's two-corner kinds hold voxel indices, so `x=10,w=5` -> corners `10` and `14`.
+
+**Reading the drawing surface is polled, not evented** (`RoiSources.kt`), because there is no single
+place drawn shapes live: under `./gradlew run` the ImageJ2 Swing UI makes a `net.imagej.overlay.Overlay`
+and `OverlayCreatedEvent` fires, while inside Fiji the IJ1 legacy UI makes an `ij.gui.Roi` and no such
+event fires. Both are read every 500 ms and keyed by **object identity** (ImageJ returns the same
+instance each poll, so an edit is `updateAnnotation` and a new drawing is `createAnnotation`; a
+geometry key would make every edit a duplicate). The IJ1 side reads the **ROI Manager only**, not the
+live `imp.roi` -- IJ1 replaces that object mid-drag, so polling it would write an annotation per drag
+state, and `t` is the standard Fiji gesture for "this one is finished". Events were rejected for a
+third reason too: SciJava holds subscribers **weakly**, so a collected handler stops firing silently.
+
+Three things the poll has to defend against, none of which errors when got wrong:
+- **The ROI Manager is a global singleton that outlives a run**, so the session snapshots what is
+  already drawn (`drawnBaseline`) and excludes it — otherwise a second `annotate_lens` re-saves the
+  first session's shapes into its new collection. It also holds ROIs for *other* open images, so a
+  ROI naming an image other than the current one is skipped.
+- **A banked IJ1 ROI remembers the slice it was drawn on** (`roi.cPosition`/`zPosition`/`tPosition`,
+  **1-based, 0 = unset**), and the viewer has usually moved on since — so the ROI's own answer wins
+  over the display's, via `ij1Pins`. Reading them naively pins every shape one slice too high.
+- **A failed mutation must not end the session.** Each shape's write is wrapped, since this action is
+  meant to run for as long as someone is drawing and one transient error would otherwise propagate
+  out of the handler and be reported `CRITICAL`. Likewise the close check only applies *after* a
+  first successful poll, so a display that has not registered yet cannot end the session instantly
+  and report success having saved nothing.
 
 **Agent / remote-invocation runtime** — `Agent.kt` + `AgentProtocol.kt`
 - `FunctionRegistry` maps an `interface` name → (handler fn, `DefinitionInput`). Handlers are
@@ -234,7 +389,7 @@ The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/`:
 
 ### Adding a new remote action
 1. Write a `suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>` handler
-   (usually in `Arkitekt.kt`, alongside `runX`/`loadImage`).
+   (usually in `Arkitekt.kt`, alongside `runX`/`showLens`).
 2. In `Actions.kt`'s `buildFunctionRegistry`,
    `registry.register_function(<interface name>, DefinitionInput(...), arkitekt::yourFn)`.
    `DefinitionInput` requires `key`, `version`, `name`, `kind`; args are `ArgPortInput`, returns are
@@ -245,8 +400,10 @@ The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/`:
 - Coroutines are used throughout; long-running work is launched on `Dispatchers.Default`/`IO`,
   UI callbacks marshalled back to `Dispatchers.Main` (Swing) via `kotlinx-coroutines-swing`.
 - Two HTTP stacks coexist: **OkHttp** (raw Fakts/OAuth calls) and **Apollo/Ktor** (GraphQL + WS).
-- Axis order is hard-coded **c,t,z,y,x**; pixel conversion currently clamps/casts to UINT32
-  regardless of source type — a known rough edge if working on image fidelity.
+- **Axis order is hard-coded c,t,z,y,x on the WRITE path only.** The read path is axis-driven
+  (see the Lens section) — mikro v2 has no canonical axis order, so anything that indexes axes by
+  position reads the wrong pixels and shows them as if they were right. Both paths preserve the
+  source dtype; they do not cast to UINT32.
 - Errors are mostly surfaced via `println` and a Logger, not structured logging.
 - The agent name is hard-coded to `"my_agent"` in `alogin`.
 - `requested_client_kind` is sent as `"desktop"`. The server also accepts

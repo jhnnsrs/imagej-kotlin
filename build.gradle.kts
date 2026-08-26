@@ -25,7 +25,7 @@ application {
 // those InaccessibleObjectException-fail silently, the patcher falls back to loading ij.IJ
 // UNPATCHED, and boot dies. This add-opens is what makes standalone preinit work.
 tasks.named<JavaExec>("run") {
-    classpath += configurations["ij1Runtime"]
+    classpath += configurations["imagejRuntime"] + configurations["ij1Runtime"]
     jvmArgs("--add-opens", "java.base/java.lang=ALL-UNNAMED")
 }
 
@@ -34,13 +34,18 @@ tasks.named<JavaExec>("run") {
 tasks.register<JavaExec>("macroSmokeTest") {
     group = "verification"
     description = "Headless smoke test of the IJ1-legacy Dataset<->ImagePlus + runMacro path"
-    classpath = sourceSets["main"].runtimeClasspath + configurations["ij1Runtime"]
+    classpath = sourceSets["main"].runtimeClasspath +
+        configurations["imagejRuntime"] + configurations["ij1Runtime"]
     mainClass.set("com.mycompany.arkitekt.MacroSmokeTestKt")
     jvmArgs("--add-opens", "java.base/java.lang=ALL-UNNAMED", "-Djava.awt.headless=true")
 }
 
 group = "com.mycompany"
-version = "0.1.0-SNAPSHOT"
+// Release version comes from the git tag via `-PpluginVersion=` (see
+// .github/workflows/release.yml); plain local builds keep the SNAPSHOT. Must stay ABOVE the
+// buildPlugin registration below, whose archiveFileName interpolates $version at
+// configuration time.
+version = (findProperty("pluginVersion") as String?) ?: "0.1.0-SNAPSHOT"
 
 description = "Arkitekt Command"
 
@@ -54,13 +59,36 @@ repositories {
     maven("https://maven.scijava.org/content/groups/public")
 }
 
+// The AWS SDK ships two HTTP implementations: apache-client (sync) and netty-nio-client (async).
+// Only the sync S3Client is ever built (Arkitekt.kt's Datalayer, and zarr-java's S3Store), so the
+// Netty stack is ~4 MB of dead weight in the plugin bundle. Excluded globally rather than per
+// dependency because it arrives both directly and transitively via the :zarr-java subproject.
+// If an S3AsyncClient is ever introduced, drop this exclude — it fails at runtime, not compile.
+configurations.all {
+    exclude(group = "software.amazon.awssdk", module = "netty-nio-client")
+}
+
 // IJ1 legacy layer for `./gradlew run` only — kept off runtimeClasspath so it is not bundled
 // into the Fiji plugin (see the ij1Runtime dependency note below).
 val ij1Runtime by configurations.creating
 
+// The ImageJ2/SciJava stack, likewise for `./gradlew run` and macroSmokeTest only. Fiji provides
+// all of it at runtime, so keeping it off runtimeClasspath keeps it out of the plugin bundle.
+val imagejRuntime by configurations.creating
+
 dependencies {
     kapt("net.imagej:imagej:2.16.0")
-    implementation("net.imagej:imagej:2.16.0")
+    // compileOnly, for the same reason as imagej-legacy below: Fiji already ships the entire
+    // ImageJ2/SciJava stack in its jars/ dir. As an `implementation` dep it put ~210 duplicate
+    // jars into the plugin bundle — including ~70 MB of scripting-language engines (scala3,
+    // jython, jruby, clojure, renjin) that arrive transitively via imagej-scripting and that this
+    // plugin never touches. Compile against it; let Fiji provide it.
+    compileOnly("net.imagej:imagej:2.16.0")
+    // Same artifact on separate configurations so `./gradlew run` / macroSmokeTest still work
+    // standalone, and so the tests can boot a real ImageJ context, without any of it reaching
+    // runtimeClasspath (which is what installToImageJ/buildPlugin bundle).
+    imagejRuntime("net.imagej:imagej:2.16.0")
+    testImplementation("net.imagej:imagej:2.16.0")
     // IJ1 legacy layer — provides `ij.IJ.runMacro` (the ImageJ macro engine) and the
     // Dataset<->ImagePlus converters used by the "Run Image-To-Image Macro" action.
     // compileOnly on purpose: Fiji already ships ij + imagej-legacy in its jars/ dir, and
@@ -188,60 +216,50 @@ tasks.register("downloadSchemas") {
 }
 
 
-
-tasks.register<Copy>("installToImageJ") {
-    description = "Copy plugin and dependencies to ImageJ plugins directory"
-
-    // Path to ImageJ's plugins directory
-    val imagejPluginsDir = file("${buildDir}/plugins")
+// --- Plugin bundling ------------------------------------------------------
+// One staging point, two consumers: `installToImageJ` drops it into a local Fiji, `buildPlugin`
+// zips it for a GitHub Release. Sync (not Copy) on purpose - a dependency that leaves
+// runtimeClasspath must also leave the bundle, or a stale jar ships forever.
+//
+// This bundles the whole `runtimeClasspath`, so whatever lands there ships. The ImageJ2/SciJava
+// stack and imagej-legacy are deliberately kept off it (compileOnly + the imagejRuntime /
+// ij1Runtime configurations) because Fiji provides them - that is what keeps this ~44 MB rather
+// than ~180 MB. Adding an `implementation` dep that Fiji already ships undoes it.
+val stagePlugin by tasks.registering(Sync::class) {
+    description = "Stage the plugin jar + its runtime dependencies into build/plugins"
 
     from(configurations.runtimeClasspath) {
         include("**/*.jar")
         exclude("**/groovy*.jar")
     }
+    from(tasks.named("jar"))
 
-    
-
-    into(imagejPluginsDir)
-
-    // Also copy your own plugin JAR
-    from(tasks.named("jar")) {
-        include("**/*.jar")
-
-    }
-
-    doLast {
-        copy {
-            from(imagejPluginsDir)
-            into(file("/home/jhnnsrs/Programs/fiji-linux64/Fiji.app/plugins/arkitekt"))
-        }
-    }
-
+    into(layout.buildDirectory.dir("plugins"))
 }
 
-tasks.register<Copy>("buildPlugin") {
-    description = "Copy plugin and dependencies to ImageJ plugins directory"
+tasks.register<Zip>("buildPlugin") {
+    group = "distribution"
+    description = "Bundle the plugin + dependencies into a distributable zip"
 
-    // Path to ImageJ's plugins directory
-    val imagejPluginsDir = file("${buildDir}/plugins")
+    // Nest under `arkitekt/` so the zip unpacks straight into Fiji.app/plugins/ with no
+    // intermediate mkdir - matching the layout installToImageJ has always produced.
+    from(stagePlugin) { into("arkitekt") }
 
-    from(configurations.runtimeClasspath) {
-        include("**/*.jar")
-        exclude("**/groovy*.jar")
-    }
+    archiveFileName.set("arkitekt-plugin-$version.zip")
+    destinationDirectory.set(layout.buildDirectory)
+}
 
-    into(imagejPluginsDir)
+// Local install. The Fiji path is the author's by default; override with
+//   ./gradlew installToImageJ -PfijiDir=/path/to/Fiji.app/plugins/arkitekt
+//
+// Deliberately a Copy, not a Sync: this writes into a user-supplied directory, and a Sync would
+// delete everything already there - a mistyped -PfijiDir pointing at Fiji.app or Fiji.app/plugins
+// would wipe the install. Stale jars can accumulate here across dependency changes; `rm -rf` the
+// target dir if that ever matters. The staging dir gets the Sync treatment instead.
+tasks.register<Copy>("installToImageJ") {
+    group = "distribution"
+    description = "Copy the plugin + dependencies into a local Fiji plugins directory"
 
-    // Also copy your own plugin JAR
-    from(tasks.named("jar")) {
-        include("**/*.jar")
-    }
-
-    // Zip the plugin directory
-    val zipFile = file("${buildDir}/arkitekt-plugin.zip")
-    doLast {
-        ant.withGroovyBuilder {
-            "zip"("destfile" to zipFile, "basedir" to imagejPluginsDir)
-        }
-    }
+    from(stagePlugin)
+    into(findProperty("fijiDir") ?: "/home/jhnnsrs/Programs/fiji-linux64/Fiji.app/plugins/arkitekt")
 }

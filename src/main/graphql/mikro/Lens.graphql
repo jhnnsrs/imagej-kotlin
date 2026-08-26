@@ -1,0 +1,75 @@
+# A Lens is mikro's "way of looking at a dataset": a per-axis slice selection over an
+# ArrayDataset. Everything needed to read and display one:
+#   - axisNames / coordinateSystem.axes -> the array's dimension order and each axis' semantic type
+#   - slices                            -> the sub-box to read out of the store
+#   - shape                             -> what the server says those slices cut out (cross-checked)
+#   - dataset.dataArrays[level 0].store -> where the pixels actually live
+#
+# `Lens.renderAxes` is deliberately NOT selected: it is deprecated. Which axis is screen
+# x/y/z/time/channel is inferred locally from the axis names and types together
+# (`resolveRenderAxes` in LensView.kt).
+query GetLens($id: ID!) {
+  lens(id: $id) {
+    id
+    axisNames
+    shape
+    slices {
+      axis
+      start
+      stop
+      step
+    }
+    coordinateSystem {
+      axes {
+        order
+        name
+        type
+      }
+    }
+    dataset {
+      id
+      name
+      dataArrays {
+        level
+        shape
+        store {
+          id
+          key
+          bucket
+          dtype
+          dimensionNames
+        }
+      }
+    }
+  }
+}
+
+# The unsliced sibling: a whole dataset, read through the same path as a lens that
+# selects everything. `intrinsicSystem` IS the level-0 pixel grid, so its axes are the
+# store's dimension order — the same list `Lens.coordinateSystem` gives.
+
+query GetArrayDataset($id: ID!) {
+  arrayDataset(id: $id) {
+    id
+    name
+    axisNames
+    intrinsicSystem {
+      axes {
+        order
+        name
+        type
+      }
+    }
+    dataArrays {
+      level
+      shape
+      store {
+        id
+        key
+        bucket
+        dtype
+        dimensionNames
+      }
+    }
+  }
+}

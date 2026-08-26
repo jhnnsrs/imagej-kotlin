@@ -1,5 +1,5 @@
-mutation FromArrayLike($input: FromArrayLikeInput!) {
-  fromArrayLike(input: $input) {
+mutation CreateArrayDataset($input: CreateArrayDatasetInput!) {
+  createArrayDataset(input: $input) {
     id
     name
   }
