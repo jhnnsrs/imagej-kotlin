@@ -15,6 +15,7 @@ import com.apollographql.apollo.network.http.HttpInterceptor
 import com.apollographql.apollo.network.http.HttpInterceptorChain
 import com.mycompany.lok.graphql.MeQuery
 import com.mycompany.mikro.graphql.CreateAnnotationCollectionMutation
+import com.mycompany.mikro.graphql.GetAnnotationCollectionQuery
 import com.mycompany.mikro.graphql.CreateAnnotationMutation
 import com.mycompany.mikro.graphql.UpdateAnnotationMutation
 import com.mycompany.mikro.graphql.CreateArrayDatasetMutation
@@ -27,6 +28,7 @@ import com.mycompany.mikro.graphql.type.AxisInput
 import com.mycompany.mikro.graphql.type.AxisType
 import com.mycompany.mikro.graphql.type.CoordinateInput
 import com.mycompany.mikro.graphql.type.CreatableTransformKind
+import com.mycompany.mikro.graphql.type.AnnotationKind
 import com.mycompany.mikro.graphql.type.CreateAnnotationCollectionInput
 import com.mycompany.mikro.graphql.type.CreateAnnotationInput
 import com.mycompany.mikro.graphql.type.DerivationSourceKind
@@ -47,6 +49,7 @@ import kotlinx.coroutines.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -1015,29 +1018,132 @@ class Arkitekt(
         val store = app.datalayer.requestAccess(view.storeId)
         val dataset = loadLensView(app, store, view)
 
-        // The collection's axes ARE the lens' axes, in array order. Two things ride on that: an
-        // IDENTITY edge needs matching rank and names, and `vectors` are positional in the
-        // collection's declared axis order — so this is also what fixes the layout we send.
-        val collection = app.mikro.getClient().mutation(
-                CreateAnnotationCollectionMutation(
-                        CreateAnnotationCollectionInput(
-                                name = "${lens.dataset.name} — ImageJ",
-                                axes = view.axes.map { AxisInput(name = it.name, type = it.type) },
-                                derivedFrom = Optional.present(
-                                        listOf(
-                                                DerivedFromInput(
-                                                        kind = DerivationSourceKind.LENS,
-                                                        lens = Optional.present(lensId),
-                                                        transform = Optional.present(
-                                                                TransformInput(kind = CreatableTransformKind.IDENTITY)
-                                                        ),
-                                                )
-                                        )
-                                ),
-                        )
-                )
-        ).execute().dataOrThrow().createAnnotationCollection
+        val collectionId = createAnnotationCollection(app, lensId, lens.dataset.name, view)
 
+        runAnnotationSession(app, view, dataset, collectionId, emptyList(), "annotate_lens")
+
+        return mapOf(Pair("collection", structureReturn("@mikro/annotationcollection", collectionId)))
+    }
+
+    // The two-way sibling: open a lens, draw the annotations it already has back into the viewer,
+    // and keep syncing from there — an edit to a pulled shape updates the annotation it came from,
+    // a new drawing creates one.
+    //
+    // WHY THE COLLECTION IS AN ARGUMENT and not something we look up: an annotation's `vectors` are
+    // positional in ITS collection's declared axis order, and a lens can carry any number of
+    // collections drawn over it by any number of clients. "The annotations of this lens" is
+    // therefore not a well-defined set to decode — so the caller names one collection, whose axes
+    // travel with it and are cross-checked against the lens (`collectionRenderAxes`) before a
+    // single shape is drawn. With no collection given this is exactly `annotate_lens`: a fresh
+    // collection and nothing to pull.
+    //
+    // The pull is ONE-SHOT, at open. mikro has no annotation subscription (`core/subscriptions/` is
+    // just `files.py`), so "keep the viewer in step with the server" would mean re-querying every
+    // poll and diffing — which cannot distinguish a shape deleted remotely from one this session
+    // has not pushed yet. Pull once, push continuously.
+    suspend fun annotateInFiji(app: App, args: Map<String, JsonElement?>): Map<String, JsonElement?> {
+
+        val lensId = structureArgId(args["lens"])
+
+        val lens = app.mikro.getClient().query(GetLensQuery(id = lensId)).execute().dataOrThrow().lens
+        val view = lensViewOf(lens)
+        val store = app.datalayer.requestAccess(view.storeId)
+        val dataset = loadLensView(app, store, view)
+
+        // A nullable STRUCTURE port arrives as JsonNull when the caller leaves it empty, which
+        // `structureArgId` would happily read as the literal string "null".
+        val collectionArg = args["collection"]?.takeIf { it !is JsonNull }
+
+        val collectionId: String
+        val prefill: List<PrefillShape>
+        if (collectionArg == null) {
+            collectionId = createAnnotationCollection(app, lensId, lens.dataset.name, view)
+            prefill = emptyList()
+        } else {
+            collectionId = structureArgId(collectionArg)
+            prefill = loadPrefill(app, collectionId, view)
+        }
+
+        runAnnotationSession(app, view, dataset, collectionId, prefill, "annotate_in_fiji")
+
+        return mapOf(Pair("collection", structureReturn("@mikro/annotationcollection", collectionId)))
+    }
+
+    // Mint the drawing surface: a collection whose axes ARE the lens' axes, in array order. Two
+    // things ride on that — an IDENTITY edge needs matching rank and names, and `vectors` are
+    // positional in the collection's declared axis order, so this is also what fixes the layout of
+    // everything the session sends.
+    private suspend fun createAnnotationCollection(
+            app: App,
+            lensId: String,
+            datasetName: String,
+            view: LensView,
+    ): String = app.mikro.getClient().mutation(
+            CreateAnnotationCollectionMutation(
+                    CreateAnnotationCollectionInput(
+                            name = "$datasetName — ImageJ",
+                            axes = view.axes.map { AxisInput(name = it.name, type = it.type) },
+                            derivedFrom = Optional.present(
+                                    listOf(
+                                            DerivedFromInput(
+                                                    kind = DerivationSourceKind.LENS,
+                                                    lens = Optional.present(lensId),
+                                                    transform = Optional.present(
+                                                            TransformInput(kind = CreatableTransformKind.IDENTITY)
+                                                    ),
+                                            )
+                                    )
+                            ),
+                    )
+            )
+    ).execute().dataOrThrow().createAnnotationCollection.id
+
+    // Read an existing collection's shapes, ready to be drawn.
+    //
+    // The axes come from the COLLECTION, not from the lens: they are what the vectors are indexed
+    // by, and a collection minted elsewhere may order them differently. `collectionRenderAxes`
+    // refuses the pair outright if the two disagree about which axis is x or y — decoding anyway
+    // would place every shape transposed, and nothing downstream would notice.
+    private suspend fun loadPrefill(app: App, collectionId: String, view: LensView): List<PrefillShape> {
+        val collection = app.mikro.getClient()
+                .query(GetAnnotationCollectionQuery(id = collectionId))
+                .execute().dataOrThrow().annotationCollection
+
+        val axes = collection.coordinateSystem.axes.sortedBy { it.order }.map { AxisSpec(it.name, it.type) }
+        val render = collectionRenderAxes(axes, view.render)
+
+        val shapes = collection.annotations.mapNotNull { annotation ->
+            prefillShapeFor(
+                    RemoteAnnotation(
+                            id = annotation.id.toString(),
+                            kind = annotation.kind,
+                            vectors = annotation.vectors,
+                            coordinates = annotation.coordinates.map { it.name to it.value },
+                    ),
+                    axes,
+                    render,
+            )
+        }
+
+        // Undecodable shapes are counted out loud: "pulled 3" when the collection held 7 reads as
+        // success. Volumetric kinds are the usual reason — a 2D drawing surface cannot show them.
+        val undecodable = collection.annotations.size - shapes.size
+        println("annotate_in_fiji: ${shapes.size} shape(s) to draw from collection $collectionId" +
+                if (undecodable > 0) " ($undecodable not drawable here)" else "")
+
+        return shapes
+    }
+
+    // The drawing session itself: open the image, put [prefill] on it, then poll the drawing surface
+    // and push what changed until the window closes or the task is cancelled.
+    private suspend fun runAnnotationSession(
+            app: App,
+            view: LensView,
+            dataset: Dataset,
+            collectionId: String,
+            prefill: List<PrefillShape>,
+            label: String,
+    ) {
         val display = withContext(Dispatchers.Main) { app.imageDisplayService.createImageDisplay(dataset) }
         val overlayService = app.datasetService.context().getService(OverlayService::class.java)
 
@@ -1046,12 +1152,37 @@ class Arkitekt(
         // (create). A geometry key would make every edit a duplicate.
         val saved = IdentityHashMap<Any, String>()
         val lastGeometry = IdentityHashMap<Any, List<List<Double>>>()
+        // The kind the SERVER stored, for a pulled shape. A round trip is not kind-preserving —
+        // an ij.gui.OvalRoi reads back as ELLIPSE whether it came from a CIRCLE or an ELLIPSE — and
+        // editing a shape's geometry is not the user saying "make this a different kind".
+        val pulledKind = IdentityHashMap<Any, AnnotationKind>()
 
         // Everything already on screen when we started — notably the ROI Manager, which is a global
-        // singleton that outlives a run. Without this, a second annotate_lens re-saves the first
-        // session's shapes into its new collection.
+        // singleton that outlives a run. Without this, a second session would re-save the first
+        // one's shapes into its new collection.
+        //
+        // ORDER IS LOAD-BEARING: the baseline is taken BEFORE the prefill goes on screen. Snapshot
+        // it afterwards and every pulled shape lands in `ignore`, so the poll never sees it again —
+        // the user's edits to pulled shapes would silently never be pushed, and the feature would
+        // look two-way while being one-way.
         val baseline = withContext(Dispatchers.Main) { drawnBaseline(overlayService, display) }
 
+        var prefillSeeded = 0
+        if (prefill.isNotEmpty()) {
+            val result = withContext(Dispatchers.Main) {
+                drawShapes(overlayService, display, prefill, view.render)
+            }
+            val byId = prefill.associateBy { it.id }
+            for (installed in result.installed) {
+                saved[installed.source] = installed.annotationId
+                byId[installed.annotationId]?.let { pulledKind[installed.source] = it.shape.kind }
+            }
+            prefillSeeded = result.installed.size
+            println("$label: drew ${result.installed.size} stored annotation(s)" +
+                    if (result.skipped > 0) " (${result.skipped} the viewer cannot draw)" else "")
+        }
+
+        var created = 0
         try {
             // Runs until the user closes the window, or the server cancels the task. A closed
             // display is dropped from the service's list, which is the only close signal available
@@ -1061,6 +1192,19 @@ class Arkitekt(
             var polled = false
             while (!polled || withContext(Dispatchers.Main) { app.imageDisplayService.imageDisplays.contains(display) }) {
                 val drawn = withContext(Dispatchers.Main) { readDrawnShapes(overlayService, display, baseline) }
+
+                // The one check that distinguishes a working prefill from a silently broken one.
+                // Both ways it can break are invisible otherwise: IJ1 clones on add (so a
+                // mis-keyed identity matches nothing) and `Ij1Rois.readAll` drops any ROI whose
+                // owning ImagePlus is not the current image (so a prefill banked before the legacy
+                // layer activated this display is read back for a different picture). Either way
+                // the shapes are on screen and edits to them are pushed as NEW annotations, which
+                // reads as "the sync duplicates everything" rather than as a seeding failure.
+                if (!polled && prefillSeeded > 0) {
+                    val matched = drawn.count { saved.containsKey(it.source) }
+                    println("$label: first poll matched $matched of $prefillSeeded pulled shape(s)" +
+                            if (matched < prefillSeeded) " — the rest will be re-created as new annotations" else "")
+                }
                 polled = true
 
                 for (item in drawn) {
@@ -1068,18 +1212,29 @@ class Arkitekt(
                         annotationSpecFor(item.shape, view.axes, view.render, positionOf(item, display, view))
                     }.getOrNull() ?: continue
 
+                    val existing = saved[item.source]
+
+                    // A pulled shape on its first sighting: record what it reads back AS, and send
+                    // nothing. The round trip is lossy — doubles through IJ1's float polygons, and
+                    // an IJ2 overlay that cannot carry a pin at all — so comparing against the
+                    // server's own vectors would fire a spurious update for every pulled shape,
+                    // overwriting the very coordinates and pins we just read.
+                    if (existing != null && !lastGeometry.containsKey(item.source)) {
+                        lastGeometry[item.source] = spec.vectors
+                        continue
+                    }
+
                     // A failed mutation must not end the drawing session — this action is meant to
                     // run for as long as someone is drawing, and one transient error would otherwise
                     // propagate out of the handler and be reported CRITICAL.
                     runCatching {
-                    val existing = saved[item.source]
                     if (existing == null) {
-                        val created = app.mikro.getClient().mutation(
+                        val createdAnnotation = app.mikro.getClient().mutation(
                                 CreateAnnotationMutation(
                                         CreateAnnotationInput(
                                                 kind = spec.kind,
                                                 vectors = spec.vectors,
-                                                collection = Optional.present(collection.id),
+                                                collection = Optional.present(collectionId),
                                                 coordinates = Optional.present(
                                                         spec.coordinates.map { CoordinateInput(it.first, it.second) }
                                                 ),
@@ -1087,14 +1242,15 @@ class Arkitekt(
                                 )
                         ).execute().dataOrThrow().createAnnotation
                         // Annotation.id is the UUID scalar, which Apollo types as Any.
-                        saved[item.source] = created.id.toString()
+                        saved[item.source] = createdAnnotation.id.toString()
                         lastGeometry[item.source] = spec.vectors
+                        created++
                     } else if (lastGeometry[item.source] != spec.vectors) {
                         app.mikro.getClient().mutation(
                                 UpdateAnnotationMutation(
                                         UpdateAnnotationInput(
                                                 id = existing,
-                                                kind = Optional.present(spec.kind),
+                                                kind = Optional.present(pulledKind[item.source] ?: spec.kind),
                                                 vectors = Optional.present(spec.vectors),
                                                 coordinates = Optional.present(
                                                         spec.coordinates.map { CoordinateInput(it.first, it.second) }
@@ -1104,7 +1260,7 @@ class Arkitekt(
                         ).execute()
                         lastGeometry[item.source] = spec.vectors
                     }
-                    }.onFailure { println("annotate_lens: could not save a ${spec.kind}: ${it.message}") }
+                    }.onFailure { println("$label: could not save a ${spec.kind}: ${it.message}") }
                 }
 
                 // A cancellable suspension point: CANCEL/INTERRUPT are cooperative Job.cancel(), so
@@ -1114,10 +1270,8 @@ class Arkitekt(
         } finally {
             // Cancellation lands here too. Every shape is already persisted, so there is nothing to
             // flush — this only reports what the session managed to save.
-            println("annotate_lens: saved ${saved.size} annotation(s) into collection ${collection.id}")
+            println("$label: $created new annotation(s), ${saved.size - created} synced, in collection $collectionId")
         }
-
-        return mapOf(Pair("collection", structureReturn("@mikro/annotationcollection", collection.id)))
     }
 
     // Download an image, run an arbitrary ImageJ macro over it (image in -> image out), and upload

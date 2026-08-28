@@ -38,12 +38,14 @@ JDK 11 and 17 are the only full JDKs installed; the build is pinned to 17. `./gr
 print a benign `Cannot create plugin: ...JavaScriptScriptLanguage` line and then keep running
 (window stays up). On a different machine, point `org.gradle.java.home` at any full JDK ≤ 17.
 
-Tests (`./gradlew test`, JUnit 5, 90 of them) cover the fakts token-rotation rule, expiry math and
+Tests (`./gradlew test`, JUnit 5, 104 of them) cover the fakts token-rotation rule, expiry math and
 flat-grant split (`FaktsTest.kt`, `TokenManagerTest.kt`); the agent wire format and close-code
 policy (`AgentProtocolTest.kt`, `CloseCodeTest.kt`); the lens read path — render-axis derivation,
 slice resolution, the permutation and the stride (`LensViewTest.kt`, which needs no network); the
 ROI write path — collection-axis-order vectors, the inclusive far corner, the per-kind vertex
-minimums and IJ1's 1-based/0-means-unset slice positions (`RoiAnnotationTest.kt`); and the agent's
+minimums and IJ1's 1-based/0-means-unset slice positions (`RoiAnnotationTest.kt`); the ROI *read*
+path that feeds `annotate_in_fiji` — the same algebra run backwards, plus the collection-vs-lens
+axis cross-check and the kinds a 2D surface cannot draw (`AnnotationRoiTest.kt`); and the agent's
 whole connection lifecycle
 (`AgentLifecycleTest.kt`) driven against `FakeGateway.kt`, a local Ktor stand-in for the `/agi`
 gateway. The fake exists because the live gateway currently refuses our registration for a
@@ -212,7 +214,9 @@ The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/`:
 `Fakts.kt` (protocol + models + cache), `TokenManager.kt`, `Auth.kt` (Apollo interceptors),
 `Arkitekt.kt` (orchestration, image/Zarr, action handlers), `Actions.kt` (port definitions),
 `LensView.kt` (the axis algebra of reading a lens), `RoiAnnotation.kt` + `RoiSources.kt`
-(the axis algebra of *writing* a drawn ROI back), `Agent.kt` + `AgentProtocol.kt`,
+(the axis algebra of *writing* a drawn ROI back), `AnnotationRoi.kt` + `RoiSinks.kt`
+(the same algebra inverted: a stored annotation drawn back into a viewer), `Agent.kt` +
+`AgentProtocol.kt`,
 `ArkitektCommand.kt`, `ArkitektTool.kt`, `ArkitektState.kt`, `NodeId.kt`, `MacroSmokeTest.kt`.
 
 **Entry point** — `ArkitektCommand.kt`
@@ -289,7 +293,8 @@ The whole plugin lives in `src/main/kotlin/com/mycompany/arkitekt/`:
   writer to arbitrary axes is a separate change.
 - **Download (Lens -> ImageJ)**: see the Lens section below.
 - **Action handlers**: `runX` (upload active image), `showLens` (display a lens), `showDataset`
-  (display a whole dataset), `annotateLens` (display a lens and save drawn ROIs — see below) and
+  (display a whole dataset), `annotateLens` (display a lens and save drawn ROIs — see below),
+  `annotateInFiji` (the same, two-way: pull an existing collection's shapes in first) and
   `runImageToImageMacro`. Each has signature
   `suspend (App, Map<String, JsonElement?>) -> Map<String, JsonElement?>`; their typed port
   definitions live in `Actions.kt` (`buildFunctionRegistry`).
@@ -395,6 +400,54 @@ Three things the poll has to defend against, none of which errors when got wrong
   out of the handler and be reported `CRITICAL`. Likewise the close check only applies *after* a
   first successful poll, so a display that has not registered yet cannot end the session instantly
   and report success having saved nothing.
+
+**Pulling annotations back into the viewer** — `AnnotationRoi.kt` + `RoiSinks.kt` + `annotateInFiji`
+
+`annotate_in_fiji` is `annotate_lens` made two-way: it draws a collection's stored shapes into the
+viewer on open, then syncs as before — an edit to a pulled shape *updates* the annotation it came
+from, a new drawing creates one. Both handlers share one `runAnnotationSession`; the only
+difference is what it is prefilled with. Five things it has to get right, and all five fail
+silently:
+
+- **The collection is an ARGUMENT, not a lookup.** `vectors` are positional in *its* collection's
+  axis order, and a lens can carry any number of collections drawn over it by any number of
+  clients — so "the annotations of this lens" is not a decodable set. The caller names one
+  (nullable: with none, this is exactly `annotate_lens`), its own `coordinateSystem.axes` come back
+  with it, and `collectionRenderAxes` **refuses** the pair unless it agrees with the lens about
+  which axis is x and which is y. Decoding a `(y,x)` collection against an `(x,y)` lens transposes
+  every shape, in range and on the image.
+- **The baseline is snapshotted BEFORE the prefill is drawn.** `drawnBaseline` is an *ignore* set;
+  taking it afterwards puts every pulled shape in it, so the poll never sees those shapes again and
+  edits to them are never pushed — a sync that looks two-way and is one-way.
+- **`lastGeometry` is seeded from what the surface reads back, not from what the server sent.** The
+  round trip is lossy (doubles through IJ1's float polygons; an IJ2 overlay carries no pin at all),
+  so a pulled shape's first sighting *records* its geometry and mutates nothing. Comparing against
+  the server's own vectors instead fires a spurious `updateAnnotation` for every pulled shape on
+  poll one, overwriting the coordinates and pins that were just read.
+- **Exactly one drawing surface is written**, though both are read. Installing a shape as an IJ1
+  `Roi` *and* an IJ2 `Overlay` yields two identities on the next poll, and the unseeded one is
+  pushed as a brand-new annotation. `RoiSinks` writes IJ1 when the legacy layer is there (Fiji) and
+  IJ2 overlays only when it is not (`./gradlew run`). ⚠️ An `Overlay` cannot carry a slice pin, so
+  on the IJ2 path an edited shape is re-pushed against wherever the viewer is standing.
+- **`RoiManager.addRoi` clones, and `getInstance()` is null until the manager is opened.** So the
+  sink opens it with `getRoiManager()` (otherwise the prefill is a silent no-op) and reads the
+  manager back afterwards, keying the session on the *appended* entries rather than on the objects
+  it constructed — which the poll would never match, re-creating every pulled shape as a new
+  annotation. If the manager did not grow by the count added, no identities are seeded at all: a
+  wrong id→object map means one shape's edit overwrites another's annotation.
+
+Two known gaps, both benign and both worth knowing: an IJ1 ROI can only carry a **c/z/t** pin, so a
+shape pinned on any other axis (a fifth axis, MICROTIME/SPECTRUM/INDEX) loses that pin and is
+re-pinned from the display on its first edit — the same class of thing as the IJ2 caveat above. And
+the collection is queried with **no `pagination`**, so a very large collection would pull whatever
+prefix the server defaults to; nothing here has been tested against one.
+
+Also: a pulled shape keeps the **kind the server stored** on update (an `OvalRoi` reads back as
+ELLIPSE whether it came from a CIRCLE or an ELLIPSE, and editing geometry is not a request to
+change kind); volumetric kinds (CUBE/SPHERE/ELLIPSOID) and an open PATH on the IJ2 side cannot be
+drawn and are counted in the log rather than dropped quietly. The pull is **one-shot, at open** —
+mikro has no annotation subscription, and re-querying each poll could not tell a shape deleted
+server-side from one this session has not pushed yet.
 
 **Agent / remote-invocation runtime** — `Agent.kt` + `AgentProtocol.kt`
 - `FunctionRegistry` maps an `interface` name → (handler fn, `DefinitionInput`). Handlers are

@@ -45,3 +45,36 @@ mutation UpdateAnnotation($input: UpdateAnnotationInput!) {
     vectors
   }
 }
+
+# An existing collection, with everything needed to draw its shapes back into a viewer.
+#
+# `coordinateSystem.axes` is selected because it is NOT redundant with the lens': `vectors` are
+# positional in the COLLECTION's declared axis order, and a caller may hand us a collection minted
+# by some other client over a different axis order. Decoding against the lens' axes instead is the
+# transposition `resolveRenderAxes` exists to prevent, and it errors nowhere — so the axes travel
+# with the vectors and the two are cross-checked before a single shape is drawn.
+#
+# `coordinates` are the pins: the slice each shape sits on for every axis it does not span. An axis
+# absent from the list is one the annotation spans, which is why a missing pin must not be read as 0.
+query GetAnnotationCollection($id: ID!) {
+  annotationCollection(id: $id) {
+    id
+    name
+    coordinateSystem {
+      axes {
+        order
+        name
+        type
+      }
+    }
+    annotations {
+      id
+      kind
+      vectors
+      coordinates {
+        name
+        value
+      }
+    }
+  }
+}

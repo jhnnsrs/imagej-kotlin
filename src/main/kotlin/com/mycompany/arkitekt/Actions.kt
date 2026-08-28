@@ -221,6 +221,83 @@ fun buildFunctionRegistry(arkitekt: Arkitekt): FunctionRegistry {
         )
 
         registry.register_function(
+            "annotate_in_fiji",
+            DefinitionInput(
+                key = "annotate_in_fiji",
+                version = "0.1.0",
+                name = "Annotate In Fiji",
+                description =
+                    Optional.present(
+                        "Open a lens in Fiji and sync its ROIs with an annotation collection in " +
+                            "both directions: the collection's existing shapes are drawn into the " +
+                            "viewer on open, and from then on every ROI drawn or edited is saved " +
+                            "back — an edit to a pulled shape updates it rather than duplicating " +
+                            "it. Press `t` to bank a selection into the ROI Manager; that is the " +
+                            "signal a shape is finished. With no collection given, a fresh one is " +
+                            "created and there is nothing to pull. The pull happens once, at open: " +
+                            "shapes added on the server afterwards do not appear. Volumetric " +
+                            "shapes (cube, sphere, ellipsoid) cannot be drawn on a 2D surface and " +
+                            "are left alone. Runs until the image window is closed or the task is " +
+                            "cancelled."
+                    ),
+                args =
+                    Optional.present(
+                        listOf(
+                            ArgPortInput(
+                                key = "lens",
+                                kind = PortKind.STRUCTURE,
+                                identifier =
+                                    Optional.present(
+                                        "@mikro/lens"
+                                    ),
+                                description =
+                                    Optional.present(
+                                        "The lens to open and annotate"
+                                    ),
+                                nullable = Optional.present(false)
+                            ),
+                            ArgPortInput(
+                                key = "collection",
+                                kind = PortKind.STRUCTURE,
+                                identifier =
+                                    Optional.present(
+                                        "@mikro/annotationcollection"
+                                    ),
+                                description =
+                                    Optional.present(
+                                        "The collection to sync with. Its own axes must agree with " +
+                                            "the lens about which axis is x and which is y — its " +
+                                            "vectors are indexed by them. Leave empty to start a " +
+                                            "new collection."
+                                    ),
+                                nullable = Optional.present(true)
+                            )
+                        )
+                    ),
+                returns =
+                    Optional.present(
+                        listOf(
+                            ReturnPortInput(
+                                key = "collection",
+                                kind = PortKind.STRUCTURE,
+                                identifier =
+                                    Optional.present(
+                                        "@mikro/annotationcollection"
+                                    ),
+                                description =
+                                    Optional.present(
+                                        "The collection the ROIs were synced with"
+                                    ),
+                                nullable = Optional.present(false)
+                            )
+                        )
+                    ),
+                kind = ActionKind.FUNCTION
+            ),
+            arkitekt::annotateInFiji
+        )
+
+        registry.register_function(
             "run_image_to_image_macro",
             DefinitionInput(
                 key = "run_image_to_image_macro",
