@@ -50,18 +50,23 @@ CI (`.github/workflows/ci.yml`) builds, tests and bundles on every push and pull
 per-test results are published as a **Test results** check, and the bundle is attached to each
 run as an artifact, so a change can be test-installed before merge.
 
-A release (`.github/workflows/release.yml`) runs the same full build — tests and the shaded-jar
-checks included, so a red build publishes nothing — then attaches the jar, the zip and their
-checksums to a GitHub Release with auto-generated notes. Trigger it either way:
+Releases are automatic. After the build passes on `main`, a `release` job runs
+[semantic-release](https://semantic-release.gitbook.io/) (config: `.releaserc.yml`): it reads the
+[Conventional Commits](https://www.conventionalcommits.org/) since the last `v*` tag, derives the
+next version, rebuilds the plugin with that version stamped in (`scripts/release-assets.sh`),
+pushes the tag and publishes a GitHub Release with the jar, the zip, a `SHA256SUMS.txt` and
+generated notes. So the commit message is the release decision:
 
-```bash
-git tag v0.1.0 && git push origin v0.1.0    # -> arkitekt-plugin-0.1.0.{jar,zip}
-```
+| Commit message                                   | Release |
+|--------------------------------------------------|---------|
+| `fix: ...`                                       | patch   |
+| `feat: ...`                                      | minor   |
+| `feat!: ...` or a `BREAKING CHANGE:` footer      | major   |
+| `docs:`, `chore:`, `ci:`, `refactor:`, `test:`   | none    |
 
-or from the GitHub UI: **Actions › Release › Run workflow**, type the version (`0.1.0`), and the
-workflow creates the tag on the chosen branch for you. A version with a suffix (`0.2.0-rc1`) is
-published as a pre-release. Dependabot keeps the workflow's actions current
-(`.github/dependabot.yml`).
+Don't push `v*` tags by hand — semantic-release owns them. The first release will be `1.0.0`
+unless an earlier `v0.x.y` tag exists for it to count from. Dependabot keeps the workflow's
+actions and the semantic-release packages current (`.github/dependabot.yml`).
 
 ## License
 

@@ -1,0 +1,69 @@
+# semantic-release configuration. Run by the `release` job in .github/workflows/ci.yml on every
+# push to main that passes the build; never by hand (it pushes a tag and publishes a release).
+#
+# The version is derived from the Conventional Commits since the last v* tag:
+#   fix: ...                -> patch      feat: ...            -> minor
+#   feat!: ... / BREAKING CHANGE footer -> major
+#   docs/chore/ci/refactor/test/style/build: ... -> no release
+# A push with no releasable commit publishes nothing. The FIRST release is always 1.0.0
+# (semantic-release's rule) unless a v0.x.y tag already exists to count from.
+
+branches:
+  - main
+
+tagFormat: "v${version}"
+
+plugins:
+  - - "@semantic-release/commit-analyzer"
+    - preset: conventionalcommits
+
+  - - "@semantic-release/release-notes-generator"
+    - preset: conventionalcommits
+      presetConfig:
+        types:
+          - { type: feat,     section: Features }
+          - { type: fix,      section: Bug Fixes }
+          - { type: perf,     section: Performance }
+          - { type: revert,   section: Reverts }
+          - { type: docs,     section: Documentation, hidden: true }
+          - { type: chore,    hidden: true }
+          - { type: ci,       hidden: true }
+          - { type: build,    hidden: true }
+          - { type: refactor, hidden: true }
+          - { type: test,     hidden: true }
+          - { type: style,    hidden: true }
+
+  # Build the plugin with the derived version stamped into the artifact names and stage the
+  # assets in dist/. Runs in the `prepare` step, i.e. after the version is known and before the
+  # tag is pushed, so a failed build publishes nothing.
+  - - "@semantic-release/exec"
+    - prepareCmd: "scripts/release-assets.sh ${nextRelease.version}"
+
+  # Tag + GitHub Release with the assets. Issue/PR comments and labels are off: they need extra
+  # token permissions and this repo has no issue traffic to annotate.
+  - - "@semantic-release/github"
+    - assets:
+        - path: dist/arkitekt-plugin-*.jar
+          label: "Plugin jar (drop into Fiji.app/plugins/)"
+        - path: dist/arkitekt-plugin-*.zip
+          label: "Plugin zip (unpacks to Fiji.app/plugins/arkitekt/)"
+        - path: dist/SHA256SUMS.txt
+          label: "SHA-256 checksums"
+      successComment: false
+      failComment: false
+      failTitle: false
+      releasedLabels: false
+      releaseBodyTemplate: |
+        <%= nextRelease.notes %>
+
+        ## Installing in Fiji
+
+        **Simplest:** download `arkitekt-plugin-<%= nextRelease.version %>.jar` and drop it into
+        your Fiji installation's `plugins/` folder. Delete any older `arkitekt-plugin-*.jar` first,
+        then restart Fiji. The plugin appears under **Plugins › Arkitekt**.
+
+        **Alternatively** unzip `arkitekt-plugin-<%= nextRelease.version %>.zip` into `plugins/`;
+        it contains a single `arkitekt/` folder, so you end up with `Fiji.app/plugins/arkitekt/`.
+        Remove a previous `plugins/arkitekt/` first.
+
+        Verify a download with `sha256sum -c SHA256SUMS.txt`.

@@ -6,3 +6,7 @@
 build/
 .gradle/
 .idea/
+
+# Release tooling (semantic-release) and its output
+node_modules/
+dist/

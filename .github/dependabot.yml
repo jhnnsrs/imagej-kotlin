@@ -10,3 +10,17 @@ updates:
     groups:
       actions:
         patterns: ['*']
+  # semantic-release and its plugins (package.json). Same cadence, one grouped PR.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      semantic-release:
+        patterns: ['*']
+    ignore:
+      # v10 moved to a new template engine and needs conventional-changelog-writer 9; the
+      # writer @semantic-release/release-notes-generator bundles is 8, and the mismatch only
+      # surfaces at release time ("Missing helper"). Stay on 9.x until the generator catches up.
+      - dependency-name: conventional-changelog-conventionalcommits
+        update-types: ['version-update:semver-major']

@@ -6,10 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A newer push to the same branch/PR makes the in-flight run irrelevant.
+# A newer push to a PR makes its in-flight run irrelevant. On main, runs queue instead: a
+# release job must never be cancelled half-way through pushing a tag and uploading assets.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -78,3 +79,49 @@ jobs:
           # ~45 MB per run; keep it from piling up in repo storage.
           retention-days: 14
           if-no-files-found: error
+
+  # semantic-release: derive the next version from the Conventional Commits since the last tag,
+  # rebuild the plugin with that version stamped in (scripts/release-assets.sh), push the v* tag
+  # and publish a GitHub Release with the jar, zip and checksums. Config: .releaserc.yml.
+  # A push whose commits are all chore/docs/ci publishes nothing and the job still goes green.
+  release:
+    name: Release
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # GITHUB_TOKEN creates the tag and the release. Issue/PR commenting is disabled in
+    # .releaserc.yml, so no issues/pull-requests permission is needed.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # semantic-release walks the history back to the last v* tag.
+          fetch-depth: 0
+          # Let semantic-release authenticate with GITHUB_TOKEN from the environment rather than
+          # the credentials checkout would otherwise bake into .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true   # reuse the build job's cache, never rewrite it
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install semantic-release
+        run: npm ci --no-audit --no-fund
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release

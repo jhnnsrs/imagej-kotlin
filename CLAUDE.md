@@ -141,19 +141,35 @@ netty/jnr jars from dependency sets that no longer exist — all of it still on 
 An install predating the marker must be `rm -rf`'d once by hand; the task says so and refuses.
 
 ### CI / releases
-`.github/workflows/ci.yml` builds, tests and bundles on push/PR (temurin 17, `gradle/actions/setup-gradle`),
-publishes per-test results as a **Test results** check (`mikepenz/action-junit-report`, hence
-`checks: write`) and uploads the zip as a run artifact. `.github/workflows/release.yml` fires on a
-`v*` tag **or** on `workflow_dispatch` with a `version` input (then the release step creates the
-tag at the chosen branch head); it runs the same full build and attaches the shaded jar, the zip
-and a `SHA256SUMS.txt` to a GitHub Release. The version is validated as semver up front, a `-`
-suffix is published as a pre-release, and a dispatch for a tag that already exists is refused.
-Both jobs carry `timeout-minutes: 30` — one run once hung for 62 hours — and both pass
-`-Dorg.gradle.java.home="$JAVA_HOME"` to override the machine-specific `org.gradle.java.home`
-pinned in `gradle.properties`: a command-line `-D` outranks the project properties file (verified:
-it beats an *invalid* path there). Only main writes the Gradle dependency cache
-(`cache-read-only` elsewhere). `.github/dependabot.yml` bumps the actions monthly, grouped; it
-deliberately does not touch Gradle deps (the ImageJ pins track what Fiji ships).
+`.github/workflows/ci.yml` has two jobs. **`build`** runs on push/PR (temurin 17,
+`gradle/actions/setup-gradle`): full Gradle build, per-test results as a **Test results** check
+(`mikepenz/action-junit-report`, hence `checks: write`), the zip as a run artifact. **`release`**
+runs after it on `main` only (push or `workflow_dispatch`) and is
+[semantic-release](https://semantic-release.gitbook.io/) — config in `.releaserc.yml`, packages
+pinned in `package.json`/`package-lock.json` (Node 22, `npm ci`). It derives the next version from
+the Conventional Commits since the last `v*` tag (`conventionalcommits` preset: `fix` patch, `feat`
+minor, `feat!`/`BREAKING CHANGE` major, everything else no release), then in its *prepare* step
+runs `scripts/release-assets.sh <version>` — `buildPlugin verifyShadedJar shadedSmokeTest` with
+`-PpluginVersion`, assets into `dist/` with a `SHA256SUMS.txt` — and only then pushes the tag and
+publishes the GitHub Release (jar, zip, checksums, generated notes plus an install blurb from
+`releaseBodyTemplate`). Tests are not re-run there: the `build` job it `needs` already gated the
+commit. **Never push `v*` tags by hand** — semantic-release owns them, and the first release is
+`1.0.0` unless a `v0.x.y` tag exists to count from. Issue/PR comments are disabled in the config,
+which is why the job needs only `contents: write`. The checkout uses `fetch-depth: 0`
+(history back to the last tag) and `persist-credentials: false` (auth via `GITHUB_TOKEN` env).
+Workflow-level concurrency cancels superseded PR runs but **queues** on main, so a release is
+never cancelled mid-publish. Both jobs carry `timeout-minutes: 30` — one run once hung for 62
+hours — and both reach Gradle with `-Dorg.gradle.java.home="$JAVA_HOME"` to override the
+machine-specific `org.gradle.java.home` pinned in `gradle.properties`: a command-line `-D`
+outranks the project properties file (verified: it beats an *invalid* path there). Only main
+writes the Gradle dependency cache (`cache-read-only` elsewhere). `.github/dependabot.yml` bumps
+the actions and the npm packages monthly, grouped; it deliberately does not touch Gradle deps
+(the ImageJ pins track what Fiji ships), and it ignores major bumps of
+`conventional-changelog-conventionalcommits`: v10 needs `conventional-changelog-writer` 9 while
+`release-notes-generator` 14 bundles 8, and the mismatch surfaces only in `generateNotes`
+("Missing helper"). A local dry run that catches this: clone into a scratch dir, point `origin` at
+a bare `file://` clone (release-notes-generator needs a URL), drop the github plugin from the
+config, and run `npx semantic-release --dry-run --no-ci`.
 CI must never run `./gradlew run` (it launches a GUI); tests set
 `java.awt.headless` themselves, so no xvfb is needed. The workflow files under
 `zarr-java/.github/` are vendored from upstream and inert — GitHub only reads the repo root.
