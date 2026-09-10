@@ -1,0 +1,12 @@
+# Keeps the GitHub Actions pinned in .github/workflows current (one grouped PR a month).
+# Gradle dependencies are deliberately NOT managed here: the ImageJ/SciJava coordinates are
+# pinned to what Fiji actually ships (see CLAUDE.md), and a blind bump would break that.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']

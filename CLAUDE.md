@@ -142,13 +142,24 @@ An install predating the marker must be `rm -rf`'d once by hand; the task says s
 
 ### CI / releases
 `.github/workflows/ci.yml` builds, tests and bundles on push/PR (temurin 17, `gradle/actions/setup-gradle`),
-uploading the zip as a run artifact. `.github/workflows/release.yml` fires on a `v*` tag and
-attaches `arkitekt-plugin-<version>.zip` to a GitHub Release. Both pass
+publishes per-test results as a **Test results** check (`mikepenz/action-junit-report`, hence
+`checks: write`) and uploads the zip as a run artifact. `.github/workflows/release.yml` fires on a
+`v*` tag **or** on `workflow_dispatch` with a `version` input (then the release step creates the
+tag at the chosen branch head); it runs the same full build and attaches the shaded jar, the zip
+and a `SHA256SUMS.txt` to a GitHub Release. The version is validated as semver up front, a `-`
+suffix is published as a pre-release, and a dispatch for a tag that already exists is refused.
+Both jobs carry `timeout-minutes: 30` — one run once hung for 62 hours — and both pass
 `-Dorg.gradle.java.home="$JAVA_HOME"` to override the machine-specific `org.gradle.java.home`
-pinned in `gradle.properties` — a command-line `-D` outranks the project properties file.
+pinned in `gradle.properties`: a command-line `-D` outranks the project properties file (verified:
+it beats an *invalid* path there). Only main writes the Gradle dependency cache
+(`cache-read-only` elsewhere). `.github/dependabot.yml` bumps the actions monthly, grouped; it
+deliberately does not touch Gradle deps (the ImageJ pins track what Fiji ships).
 CI must never run `./gradlew run` (it launches a GUI); tests set
 `java.awt.headless` themselves, so no xvfb is needed. The workflow files under
 `zarr-java/.github/` are vendored from upstream and inert — GitHub only reads the repo root.
+A CI-faithful local check is a cold build in Docker (`eclipse-temurin:17-jdk`, fresh
+`GRADLE_USER_HOME`): the root `repositories` lists `mavenLocal()` first, so `~/.m2` can hide a
+dependency the runner cannot see.
 
 **The one fragile dependency in CI is `maven.scijava.org`.** It is the sole non-Central
 repository and it is *required* — the whole `net.imagej` group is absent from Maven Central

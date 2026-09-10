@@ -11,44 +11,70 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  checks: write   # "Test results" check run published by action-junit-report
+
 jobs:
   build:
+    name: Build, test and bundle
     runs-on: ubuntu-latest
+    # A hung test or smoke run must not sit on the runner for days (one did: 62 h).
+    # A cold run with every dependency downloaded is ~5 min; warm is ~2.
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Full JDK 17: Gradle 8.10 cannot run on a newer JDK, and the build needs AWT present
       # (the tests boot an ImageJ context). The tests set java.awt.headless themselves, so no
       # xvfb is required.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
-      # Dependency caching + Gradle wrapper checksum validation.
-      - uses: gradle/actions/setup-gradle@v4
+      # Dependency caching + Gradle wrapper checksum validation + a build summary on the job.
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          # Only main writes the dependency cache; branches and PRs read it.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
       # gradle.properties pins org.gradle.java.home to the author's machine. A command-line -D
-      # outranks the project gradle.properties, so CI overrides it without touching local dev.
-      # (Fallback if that precedence ever fails: append the same line to ~/.gradle/gradle.properties,
-      # which also outranks the project file.)
+      # outranks the project gradle.properties (verified: it beats an invalid path there), so CI
+      # overrides it without touching local dev.
+      #
+      # `build` runs `check`, which is the tests plus verifyShadedJar and shadedSmokeTest -- the
+      # two tasks that catch a broken relocation before it surfaces inside someone's Fiji.
       - name: Build, test and bundle
         run: ./gradlew build buildPlugin -Dorg.gradle.java.home="$JAVA_HOME" --stacktrace
 
+      # Per-test pass/fail as a check run + job summary, so a red PR says which test, not
+      # just "exit code 1".
+      - name: Publish test results
+        if: always()
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: build/test-results/test/*.xml
+          check_name: Test results
+          detailed_summary: true
+          require_tests: false   # a compile failure produces no XML; that is already red
+
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports
           path: build/reports/tests/**
           retention-days: 7
+          if-no-files-found: ignore
 
       # So a PR can be test-installed into a real Fiji before it is merged.
       - name: Upload plugin bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: arkitekt-plugin
           path: build/arkitekt-plugin-*.zip
-          # The bundle is ~180 MB; keep it from piling up in repo storage.
+          # ~45 MB per run; keep it from piling up in repo storage.
           retention-days: 14
+          if-no-files-found: error
